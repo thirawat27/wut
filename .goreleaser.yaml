@@ -1,0 +1,382 @@
+# GoReleaser configuration for WUT
+# Documentation: https://goreleaser.com
+
+version: 2
+
+project_name: wut
+
+# Build configuration
+before:
+  hooks:
+    - go mod tidy
+    - go generate ./...
+
+# Build matrices
+builds:
+  - id: wut
+    main: .
+    binary: wut
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.Version={{.Version}}
+      - -X main.BuildTime={{.Date}}
+      - -X main.Commit={{.Commit}}
+      - -X main.BuildHost={{.Env.HOSTNAME}}
+    goos:
+      - linux
+      - darwin
+      - windows
+      - freebsd
+      - openbsd
+      - netbsd
+    goarch:
+      - amd64
+      - arm64
+      - arm
+      - "386"
+      - riscv64
+    goarm:
+      - "6"
+      - "7"
+    ignore:
+      - goos: darwin
+        goarch: "386"
+      - goos: darwin
+        goarch: arm
+      - goos: windows
+        goarch: riscv64
+      - goos: freebsd
+        goarch: riscv64
+      - goos: openbsd
+        goarch: arm64
+      - goos: openbsd
+        goarch: arm
+      - goos: openbsd
+        goarch: "386"
+      - goos: openbsd
+        goarch: riscv64
+      - goos: netbsd
+        goarch: arm64
+      - goos: netbsd
+        goarch: arm
+      - goos: netbsd
+        goarch: "386"
+      - goos: netbsd
+        goarch: riscv64
+
+# Archive configuration
+archives:
+  - id: wut
+    name_template: >-
+      {{ .ProjectName }}_
+      {{- .Version }}_
+      {{- title .Os }}_
+      {{- if eq .Arch "amd64" }}x86_64
+      {{- else if eq .Arch "386" }}i386
+      {{- else }}{{ .Arch }}{{ end }}
+      {{- if .Arm }}v{{ .Arm }}{{ end }}
+    format_overrides:
+      - goos: windows
+        format: zip
+    files:
+      - LICENSE
+      - README.md
+      - completions/*
+
+# Checksum configuration
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+# Release configuration
+release:
+  github:
+    owner: thirawat27
+    name: wut
+  draft: false
+  prerelease: auto
+  name_template: "{{.ProjectName}}-v{{.Version}}"
+  footer: |
+    ## Installation
+
+    ### Quick Install (Linux/macOS)
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
+    ```
+
+    ### Windows (PowerShell)
+    ```powershell
+    irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
+    ```
+
+    ### Homebrew (macOS/Linux)
+    ```bash
+    brew tap thirawat27/wut
+    brew install wut
+    ```
+
+    ### Scoop (Windows)
+    ```powershell
+    scoop bucket add wut https://github.com/thirawat27/scoop-wut
+    scoop install wut
+    ```
+
+    ### Chocolatey (Windows)
+    ```powershell
+    choco install wut
+    ```
+
+# Changelog configuration
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+      - "^chore:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: "🚀 Features"
+      regexp: "^feat([(:])"
+      order: 0
+    - title: "🐛 Bug Fixes"
+      regexp: "^fix([(:])"
+      order: 1
+    - title: "🧹 Maintenance"
+      regexp: "^(chore|refactor|perf|style)([(:])"
+      order: 2
+    - title: "📚 Documentation"
+      regexp: "^docs([(:])"
+      order: 3
+    - title: "🔬 Testing"
+      regexp: "^test([(:])"
+      order: 4
+    - title: "⚙️ CI/CD"
+      regexp: "^ci([(:])"
+      order: 5
+    - title: "Others"
+      order: 999
+
+# Snapshot configuration
+snapshot:
+  version_template: "{{ .Version }}-next"
+
+# Source archive
+source:
+  enabled: true
+  name_template: "{{ .ProjectName }}_{{ .Version }}_source"
+
+# SBOM generation
+sboms:
+  - id: wut
+    artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+    cmd: syft
+    args: ["$artifact", "--output", "cyclonedx-json={{ .document }}"]
+
+# Homebrew Tap Configuration
+brews:
+  - name: wut
+    repository:
+      owner: thirawat27
+      name: homebrew-wut
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/thirawat27/wut"
+    description: "AI-Powered Command Helper - Find commands using natural language"
+    license: "MIT"
+    dependencies:
+      - name: git
+        type: optional
+    test: |
+      system "#{bin}/wut", "--version"
+    install: |
+      bin.install "wut"
+      bash_completion.install "completions/wut.bash" => "wut"
+      zsh_completion.install "completions/_wut"
+      fish_completion.install "completions/wut.fish"
+    caveats: |
+      To get started with wut, run:
+        wut suggest
+
+      To install shell integration:
+        wut install
+
+# Scoop Bucket Configuration
+scoops:
+  - repository:
+      owner: thirawat27
+      name: scoop-wut
+      branch: main
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
+    folder: bucket
+    homepage: "https://github.com/thirawat27/wut"
+    description: "AI-Powered Command Helper - Find commands using natural language"
+    license: MIT
+    depends: ["git"]
+    suggest:
+      - "git"
+    shortcuts: []
+    post_install: |
+      Write-Host "WUT has been installed!"
+      Write-Host "To get started, run: wut suggest"
+      Write-Host "To install shell integration, run: wut install"
+    uninstaller:
+      script: |
+        Write-Host "Removing WUT configuration..."
+        Remove-Item -Recurse -Force "$env:USERPROFILE\.config\wut" -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force "$env:USERPROFILE\.wut" -ErrorAction SilentlyContinue
+
+# Chocolatey Package Configuration
+chocolateys:
+  - name: wut
+    title: WUT - AI Command Helper
+    authors: Thirawat
+    project_url: https://github.com/thirawat27/wut
+    icon_url: https://raw.githubusercontent.com/thirawat27/wut/main/assets/icon.png
+    copyright: 2024 Thirawat
+    license_url: https://github.com/thirawat27/wut/blob/main/LICENSE
+    require_license_acceptance: false
+    project_source_url: https://github.com/thirawat27/wut
+    docs_url: https://github.com/thirawat27/wut/blob/main/README.md
+    bug_tracker_url: https://github.com/thirawat27/wut/issues
+    summary: AI-Powered Command Helper
+    description: |
+      WUT is a production-ready, cross-platform, intelligent command line assistant 
+      that helps you find the right commands, correct typos, and learn new shell 
+      commands through natural language queries.
+
+      ## Features
+      - Natural language command suggestions
+      - Command typo correction
+      - Local AI processing (no cloud)
+      - Cross-platform support (Windows, macOS, Linux, BSD)
+      - Multiple shell support (Bash, Zsh, Fish, PowerShell, etc.)
+      - Beautiful TUI with terminal adaptation
+
+      ## Getting Started
+      After installation, run:
+      ```
+      wut suggest
+      ```
+
+      To install shell integration:
+      ```
+      wut install
+      ```
+    release_notes: "https://github.com/thirawat27/wut/releases/tag/v{{ .Version }}"
+    dependencies:
+      - id: git
+    api_key: "{{ .Env.CHOCOLATEY_API_KEY }}"
+    source: "{{ .Dist }}"
+    skip_publish: false
+    goamd64: v1
+
+# Docker Images Configuration
+dockers:
+  # AMD64 images
+  - image_templates:
+      - "ghcr.io/thirawat27/wut:{{ .Version }}-amd64"
+      - "ghcr.io/thirawat27/wut:latest-amd64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+    goos: linux
+    goarch: amd64
+  # ARM64 images
+  - image_templates:
+      - "ghcr.io/thirawat27/wut:{{ .Version }}-arm64"
+      - "ghcr.io/thirawat27/wut:latest-arm64"
+    dockerfile: Dockerfile
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.created={{ .Date }}"
+      - "--label=org.opencontainers.image.title={{ .ProjectName }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+    goos: linux
+    goarch: arm64
+
+docker_manifests:
+  - name_template: "ghcr.io/thirawat27/wut:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/thirawat27/wut:{{ .Version }}-amd64"
+      - "ghcr.io/thirawat27/wut:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/thirawat27/wut:latest"
+    image_templates:
+      - "ghcr.io/thirawat27/wut:latest-amd64"
+      - "ghcr.io/thirawat27/wut:latest-arm64"
+
+# Nix flake (optional)
+# nix:
+#   - repository:
+#       owner: thirawat27
+#       name: wut
+#       branch: main
+#     path: flake.nix
+#     name: wut
+
+# Winget (Windows Package Manager) - via external publisher
+# publish winget packages via winget-pkgs repo or goreleaser-winget
+
+# Aur (Arch Linux User Repository)
+# aurs:
+#   - name: wut
+#     private_key: "{{ .Env.AUR_KEY }}"
+#     git_url: "ssh://aur@aur.archlinux.org/wut.git"
+#     depends:
+#       - git
+
+# Snapcraft (Ubuntu Snap Store)
+# snaps:
+#   - name: wut
+#     publish: true
+#     summary: AI-Powered Command Helper
+#     description: WUT helps you find commands using natural language
+#     grade: stable
+#     confinement: classic
+#     license: MIT
+#     base: core22
+
+# GPG signing
+signs:
+  - artifacts: checksum
+    args:
+      - "--batch"
+      - "--local-user"
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - "--output"
+      - "${signature}"
+      - "--detach-sign"
+      - "${artifact}"
+
+# Announcing
+announce:
+  # Discord
+  discord:
+    enabled: false
+    message_template: "🚀 WUT {{ .Version }} is out! Check it out: {{ .ReleaseURL }}"
+
+  # Twitter/X
+  twitter:
+    enabled: false
+    message_template: "🚀 WUT {{ .Version }} is out! AI-powered command helper for all platforms. {{ .ReleaseURL }}"
+
+  # Mastodon
+  mastodon:
+    enabled: false
+    message_template: "🚀 WUT {{ .Version }} is released! {{ .ReleaseURL }}"
+    server: ""
