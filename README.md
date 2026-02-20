@@ -54,24 +54,7 @@ irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | 
 
 ### Package Managers
 
-**Homebrew (macOS/Linux):** ⭐ Recommended
-```bash
-brew tap thirawat27/wut
-brew install wut
-```
-
-**WinGet (Windows):** ⭐ Recommended
-```powershell
-winget install thirawat27.wut
-```
-
-**Scoop (Windows):**
-```powershell
-scoop bucket add wut https://github.com/thirawat27/scoop-wut
-scoop install wut
-```
-
-**Chocolatey (Windows):**
+**Chocolatey (Windows):** ⭐ Recommended
 ```powershell
 choco install wut
 ```

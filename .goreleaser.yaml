@@ -111,18 +111,6 @@ release:
     irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
     ```
 
-    ### Homebrew (macOS/Linux)
-    ```bash
-    brew tap thirawat27/wut
-    brew install wut
-    ```
-
-    ### Scoop (Windows)
-    ```powershell
-    scoop bucket add wut https://github.com/thirawat27/scoop-wut
-    scoop install wut
-    ```
-
     ### Chocolatey (Windows)
     ```powershell
     choco install wut
@@ -179,60 +167,6 @@ sboms:
       - "{{ .ArtifactName }}.sbom.json"
     cmd: syft
     args: ["$artifact", "--output", "cyclonedx-json={{ .document }}"]
-
-# Homebrew Tap Configuration
-brews:
-  - name: wut
-    repository:
-      owner: thirawat27
-      name: homebrew-wut
-      branch: main
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    directory: Formula
-    homepage: "https://github.com/thirawat27/wut"
-    description: "AI-Powered Command Helper - Find commands using natural language"
-    license: "MIT"
-    dependencies:
-      - name: git
-        type: optional
-    test: |
-      system "#{bin}/wut", "--version"
-    install: |
-      bin.install "wut"
-      bash_completion.install "completions/wut.bash" => "wut"
-      zsh_completion.install "completions/_wut"
-      fish_completion.install "completions/wut.fish"
-    caveats: |
-      To get started with wut, run:
-        wut suggest
-
-      To install shell integration:
-        wut install
-
-# Scoop Bucket Configuration
-scoops:
-  - repository:
-      owner: thirawat27
-      name: scoop-wut
-      branch: main
-      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
-    folder: bucket
-    homepage: "https://github.com/thirawat27/wut"
-    description: "AI-Powered Command Helper - Find commands using natural language"
-    license: MIT
-    depends: ["git"]
-    suggest:
-      - "git"
-    shortcuts: []
-    post_install: |
-      Write-Host "WUT has been installed!"
-      Write-Host "To get started, run: wut suggest"
-      Write-Host "To install shell integration, run: wut install"
-    uninstaller:
-      script: |
-        Write-Host "Removing WUT configuration..."
-        Remove-Item -Recurse -Force "$env:USERPROFILE\.config\wut" -ErrorAction SilentlyContinue
-        Remove-Item -Recurse -Force "$env:USERPROFILE\.wut" -ErrorAction SilentlyContinue
 
 # Chocolatey Package Configuration
 chocolateys:
