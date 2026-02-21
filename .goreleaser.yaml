@@ -99,31 +99,14 @@ release:
   prerelease: auto
   name_template: "{{.ProjectName}}-v{{.Version}}"
   footer: |
-    ## Installation
+    ## Installation (auto-init, ready to use immediately)
 
-    ### Quick Install (Linux/macOS)
-    ```bash
-    curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
-    ```
-
-    ### Quick Install (Windows PowerShell)
-    ```powershell
-    irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
-    ```
-
-    ### With Initialization
     ```bash
     # Linux/macOS
-    curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --init
+    curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
 
-    # Windows
-    irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex -Init
-    ```
-
-    ### Package Managers
-    ```bash
-    # Chocolatey (Windows)
-    choco install wut
+    # Windows (PowerShell)
+    irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 
     # Go Install
     go install github.com/thirawat27/wut@latest
