@@ -44,11 +44,24 @@ curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install
 irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 ```
 
+**Install with Auto-Setup:**
+
+```bash
+# Linux/macOS - Install and run initialization
+curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --init
+
+# Windows - Install with initialization
+irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex -Init
+```
+
 **Package Managers:**
 
 ```bash
 # Chocolatey (Windows)
 choco install wut
+
+# WinGet (Windows)
+winget install thirawat27.wut
 
 # Go Install
 go install github.com/thirawat27/wut@latest

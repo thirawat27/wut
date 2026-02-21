@@ -106,14 +106,30 @@ release:
     curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
     ```
 
-    ### Windows (PowerShell)
+    ### Quick Install (Windows PowerShell)
     ```powershell
     irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
     ```
 
-    ### Chocolatey (Windows)
-    ```powershell
+    ### With Initialization
+    ```bash
+    # Linux/macOS
+    curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --init
+
+    # Windows
+    irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex -Init
+    ```
+
+    ### Package Managers
+    ```bash
+    # Chocolatey (Windows)
     choco install wut
+
+    # Go Install
+    go install github.com/thirawat27/wut@latest
+
+    # Docker
+    docker pull ghcr.io/thirawat27/wut:latest
     ```
 
 # Changelog configuration
@@ -175,7 +191,7 @@ chocolateys:
     authors: Thirawat
     project_url: https://github.com/thirawat27/wut
     icon_url: https://raw.githubusercontent.com/thirawat27/wut/main/assets/icon.png
-    copyright: 2024 Thirawat
+    copyright: 2025 Thirawat
     license_url: https://github.com/thirawat27/wut/blob/main/LICENSE
     require_license_acceptance: false
     project_source_url: https://github.com/thirawat27/wut
@@ -205,7 +221,7 @@ chocolateys:
       ```
       wut install
       ```
-    release_notes: "https://github.com/thirawat27/wut/releases/tag/v{{ .Version }}"
+    release_notes: "https://github.com/thirawat27/wut/releases/tag/{{ .Version }}"
     dependencies:
       - id: git
     api_key: "{{ .Env.CHOCOLATEY_API_KEY }}"
