@@ -7,7 +7,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
 #   
 #   # With options:
-#   curl -fsSL ... | bash -s -- --version v1.0.0 --init
+#   curl -fsSL ... | bash -s -- --version v1.0.0 --no-init
 
 set -e
 
@@ -35,7 +35,7 @@ TEMP_DIR="${TEMP_DIR:-$(mktemp -d)}"
 
 # Flags
 NO_SHELL_INTEGRATION=0
-RUN_INIT=0
+RUN_INIT=1
 FORCE=0
 VERBOSE=0
 
@@ -485,6 +485,7 @@ install_shell_integration() {
 # Run wut init
 run_init() {
     if [ $RUN_INIT -eq 0 ]; then
+        print_verbose "Skipping initialization (--no-init)"
         return 0
     fi
     
@@ -578,7 +579,7 @@ Options:
   --version VERSION       Install specific version (default: latest)
   --install-dir DIR       Install to specific directory (default: ~/.local/bin)
   --no-shell-integration  Skip shell integration
-  --init                  Run 'wut init' after installation
+  --no-init               Skip automatic initialization (init runs by default)
   --force                 Force overwrite existing installation
   --verbose               Enable verbose output
   --help                  Show this help message
@@ -590,14 +591,14 @@ Environment Variables:
   DATA_DIR                Data directory
 
 Examples:
-  # Install latest version
+  # Install latest version (auto-init, ready to use immediately)
   ./install.sh
 
   # Install specific version
   ./install.sh --version v1.0.0
 
-  # Install with initialization
-  ./install.sh --init
+  # Install without auto-init
+  ./install.sh --no-init
 
   # Install to custom directory
   ./install.sh --install-dir /usr/local/bin
@@ -700,6 +701,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-shell-integration)
             NO_SHELL_INTEGRATION=1
+            shift
+            ;;
+        --no-init)
+            RUN_INIT=0
             shift
             ;;
         --init)

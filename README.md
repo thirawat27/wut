@@ -32,7 +32,7 @@ WUT is a production-ready, cross-platform, intelligent command line assistant th
 
 ### Installation
 
-**One-Line Install (Recommended):**
+**One-Line Install (Recommended — installs, initializes, and sets up shell integration automatically):**
 
 ```bash
 # Linux/macOS
@@ -42,14 +42,17 @@ curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install
 irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 ```
 
-**Install with Auto-Setup:**
+> ✅ Both scripts automatically run `wut init --quick` and set up shell integration.
+> No extra steps needed — just install and use!
+
+**Install without auto-setup:**
 
 ```bash
-# Linux/macOS - Install and run initialization
-curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --init
+# Linux/macOS - Skip initialization
+curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --no-init
 
-# Windows - Install with initialization
-irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex -Init
+# Windows (PowerShell) - Skip initialization
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1))) -NoInit
 ```
 
 **Package Managers:**
@@ -68,9 +71,9 @@ go install github.com/thirawat27/wut@latest
 docker pull ghcr.io/thirawat27/wut:latest
 ```
 
-### First-Time Setup
+### Manual Setup (if needed)
 
-After installation, run the initialization wizard:
+If you skip auto-setup or want to reconfigure, run the initialization wizard:
 
 ```bash
 wut init              # Interactive setup
