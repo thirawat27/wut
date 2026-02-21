@@ -32,27 +32,36 @@ WUT is a production-ready, cross-platform, intelligent command line assistant th
 
 ### Installation
 
-**One-Line Install (installs + auto-init + shell integration — ready to use immediately):**
+**One-Line Install (Recommended):**
+
+> ✅ ติดตั้ง + ตั้งค่า shell integration + init อัตโนมัติ พร้อมใช้เลยทันที
 
 ```bash
-# Linux/macOS
+# Linux / macOS
 curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
 
 # Windows (PowerShell)
 irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 ```
 
-> ✅ No extra steps needed — just install and use!
-
-**Advanced options:**
+**With options:**
 
 ```bash
-# Linux/macOS
-curl -fsSL ... | bash -s -- --no-init --no-shell --force --version v1.0.0
+# Linux/macOS — install specific version, skip auto-init
+curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --version v1.0.0 --no-init
 
-# Windows (run as file)
-.\install.ps1 -NoInit -NoShell -Force -Version v1.0.0
+# Windows — install specific version, skip auto-init
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1))) -Version v1.0.0 -NoInit
 ```
+
+**Installer options:**
+
+| Option | Linux/macOS | Windows | Description |
+|--------|------------|---------|-------------|
+| Version | `--version v1.0.0` | `-Version v1.0.0` | Install specific version |
+| Skip init | `--no-init` | `-NoInit` | Skip `wut init --quick` |
+| Skip shell | `--no-shell` | `-NoShell` | Skip shell integration |
+| Force | `--force` | `-Force` | Overwrite existing install |
 
 **Package Managers:**
 
@@ -73,6 +82,12 @@ docker pull ghcr.io/thirawat27/wut:latest
 wut init              # Interactive setup
 wut init --quick      # Quick setup with defaults
 ```
+
+This will:
+- Create configuration directories
+- Set up your preferred theme
+- Detect and configure shell integration
+- Optionally download TLDR pages
 
 ## 📖 Usage
 

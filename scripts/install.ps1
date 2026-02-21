@@ -1,240 +1,261 @@
-# WUT - Command Helper | Windows Installer
-# Usage:  irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
+# WUT - Windows Installation Script
+# Works with: irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 
-function Install-WUT {
+function Invoke-WutInstall {
     param(
-        [string]$Version = "latest",
+        [string]$Version    = "latest",
         [string]$InstallDir = "$env:USERPROFILE\.local\bin",
         [switch]$NoInit,
         [switch]$NoShell,
-        [switch]$Force
+        [switch]$Force,
+        [switch]$Help
     )
 
-    $ErrorActionPreference = "Stop"
-    $ProgressPreference = "SilentlyContinue"
+    # ── Constants ───────────────────────────────────────────────────────────────
+    $REPO  = "https://github.com/thirawat27/wut"
+    $API   = "https://api.github.com/repos/thirawat27/wut"
+    $TMP   = Join-Path $env:TEMP ("wut-" + [guid]::NewGuid().ToString("N").Substring(0,8))
 
-    $repo = "thirawat27/wut"
-    $api  = "https://api.github.com/repos/$repo"
-    $base = "https://github.com/$repo"
-    $tmp  = Join-Path $env:TEMP "wut-install-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+    # ── Helpers ─────────────────────────────────────────────────────────────────
+    function Cyan   ($s) { Write-Host $s -ForegroundColor Cyan }
+    function Green  ($s) { Write-Host "  [+] $s" -ForegroundColor Green }
+    function Yellow ($s) { Write-Host "  [!] $s" -ForegroundColor Yellow }
+    function Red    ($s) { Write-Host "  [x] $s" -ForegroundColor Red }
+    function Step   ($s) { Write-Host "`n  --> $s" -ForegroundColor Blue }
+    function Info   ($s) { Write-Host "      $s" }
 
-    # --- helpers ---
-    $c = $Host.UI.SupportsVirtualTerminal
-    function ok   ($m) { if($c){Write-Host " [OK] " -F Green -N}else{Write-Host " [OK] " -N}; Write-Host $m }
-    function err  ($m) { if($c){Write-Host " [ERR] " -F Red -N}else{Write-Host " [ERR] " -N}; Write-Host $m }
-    function info ($m) { if($c){Write-Host " [>] " -F Cyan -N}else{Write-Host " [>] " -N}; Write-Host $m }
-    function warn ($m) { if($c){Write-Host " [!] " -F Yellow -N}else{Write-Host " [!] " -N}; Write-Host $m }
-
-    function banner {
-        Write-Host ""
-        if($c){ Write-Host "  WUT - Command Helper  |  Windows Installer" -F Cyan }
-        else  { Write-Host "  WUT - Command Helper  |  Windows Installer" }
-        Write-Host ""
+    function Show-Banner {
+        Cyan ""
+        Cyan "  ╔══════════════════════════════════════════╗"
+        Cyan "  ║   WUT - Command Helper                   ║"
+        Cyan "  ║   Windows Installer                      ║"
+        Cyan "  ╚══════════════════════════════════════════╝"
+        Cyan ""
     }
 
-    # --- detect platform ---
+    function Show-Help {
+        Write-Host @"
+WUT Installer
+
+USAGE
+  irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
+
+  With options (must use scriptblock form):
+  & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1))) [OPTIONS]
+
+OPTIONS
+  -Version <tag>      Specific version to install  (default: latest)
+  -InstallDir <path>  Where to install wut.exe     (default: ~\.local\bin)
+  -NoInit             Skip automatic 'wut init'
+  -NoShell            Skip shell integration setup
+  -Force              Overwrite existing install
+  -Help               Show this help
+"@
+    }
+
     function Get-Arch {
         switch ($env:PROCESSOR_ARCHITECTURE) {
             "AMD64" { "x86_64" }
-            "ARM64" { "arm64" }
-            "x86"   { "i386" }
+            "ARM64" { "arm64"  }
+            "x86"   { "i386"   }
             default { "x86_64" }
         }
     }
 
-    # --- resolve version ---
-    function Resolve-Ver {
-        if ($Version -ne "latest") { return $Version }
+    function Get-LatestTag {
         try {
-            $r = Invoke-RestMethod "$api/releases/latest" -TimeoutSec 15
-            return $r.tag_name
+            (Invoke-RestMethod "$API/releases/latest" -TimeoutSec 15).tag_name
         } catch {
-            err "Cannot fetch latest version from GitHub"
-            return $null
+            throw "Cannot reach GitHub API. Check your internet connection."
         }
     }
 
-    # --- download ---
-    function Get-File ($url, $out) {
+    function Download-Binary ($tag) {
+        $arch    = Get-Arch
+        $ver     = $tag -replace '^v',''
+        $archive = "wut_${ver}_Windows_${arch}.zip"
+        $url     = "$REPO/releases/download/$tag/$archive"
+        $dest    = Join-Path $TMP $archive
+
+        Step "Downloading wut $tag ($arch)..."
+        Info $url
+
         try {
-            Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -TimeoutSec 120 | Out-Null
-            return $true
-        } catch { return $false }
+            $prev = $ProgressPreference
+            $ProgressPreference = 'SilentlyContinue'
+            Invoke-WebRequest $url -OutFile $dest -UseBasicParsing -TimeoutSec 120
+            $ProgressPreference = $prev
+        } catch {
+            throw "Download failed: $_"
+        }
+
+        Step "Extracting..."
+        Expand-Archive $dest -DestinationPath $TMP -Force
+
+        $bin = Get-ChildItem $TMP -Filter "wut.exe" -Recurse | Select-Object -First 1
+        if (-not $bin) { throw "wut.exe not found in archive" }
+        return $bin.FullName
     }
 
-    # --- add to user PATH ---
-    function Add-UserPath ($dir) {
-        $p = [Environment]::GetEnvironmentVariable("PATH","User")
-        if ($p -and $p.Split(';') -contains $dir) { return }
-        $np = if($p){"$p;$dir"}else{$dir}
-        [Environment]::SetEnvironmentVariable("PATH",$np,"User")
-        if ($env:PATH -notlike "*$dir*") { $env:PATH += ";$dir" }
-        ok "Added to PATH (permanent)"
-    }
-
-    # --- main ---
-    banner
-
-    $arch = Get-Arch
-    $platform = "Windows_$arch"
-    info "Platform: $platform"
-
-    # resolve version
-    $ver = Resolve-Ver
-    if (-not $ver) { return }
-    info "Version:  $ver"
-
-    # prepare dirs
-    @($InstallDir, "$env:USERPROFILE\.config\wut", "$env:USERPROFILE\.wut\data", "$env:USERPROFILE\.wut\logs", $tmp) | ForEach-Object {
-        if (!(Test-Path $_)) { New-Item -ItemType Directory -Path $_ -Force | Out-Null }
-    }
-
-    $dest = Join-Path $InstallDir "wut.exe"
-
-    # check existing
-    if ((Test-Path $dest) -and !$Force) {
-        $ev = try { & $dest --version 2>$null | Select-Object -First 1 } catch { "unknown" }
-        warn "Already installed: $ev  (use -Force to overwrite)"
-    }
-
-    # --- try package managers first ---
-    $installed = $false
-
-    # WinGet
-    if (!$installed -and (Get-Command winget -EA SilentlyContinue)) {
-        info "Trying WinGet..."
-        try {
-            winget install "$repo" --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
-            # refresh PATH
-            $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [Environment]::GetEnvironmentVariable("PATH","User")
-            if (Get-Command wut -EA SilentlyContinue) {
-                ok "Installed via WinGet"
-                $installed = $true
-            }
-        } catch {}
-    }
-
-    # Scoop
-    if (!$installed -and (Get-Command scoop -EA SilentlyContinue)) {
-        info "Trying Scoop..."
-        try {
-            scoop install wut 2>&1 | Out-Null
-            if (Get-Command wut -EA SilentlyContinue) {
-                ok "Installed via Scoop"
-                $installed = $true
-            }
-        } catch {}
-    }
-
-    # Direct download
-    if (!$installed) {
-        $vn = $ver -replace '^v',''
-        $archive = "wut_${vn}_${platform}.zip"
-        $url = "$base/releases/download/$ver/$archive"
-        $zipPath = Join-Path $tmp $archive
-
-        info "Downloading $archive ..."
-        if (!(Get-File $url $zipPath)) {
-            err "Download failed: $url"
-
-            # fallback: build from source
-            if (Get-Command go -EA SilentlyContinue) {
-                info "Building from source..."
-                try {
-                    $env:CGO_ENABLED = "0"
-                    $srcDir = Join-Path $tmp "src"
-                    if (Get-Command git -EA SilentlyContinue) {
-                        git clone --depth 1 "$base.git" $srcDir 2>&1 | Out-Null
-                    } else {
-                        Get-File "$base/archive/refs/heads/main.zip" (Join-Path $tmp "src.zip")
-                        Expand-Archive (Join-Path $tmp "src.zip") $tmp -Force
-                        Rename-Item (Join-Path $tmp "wut-main") $srcDir
-                    }
-                    Push-Location $srcDir
-                    go build -ldflags="-s -w" -o $dest . 2>&1 | Out-Null
-                    Pop-Location
-                    ok "Built from source"
-                    $installed = $true
-                } catch {
-                    err "Build failed: $_"
-                }
-            } else {
-                err "No Go compiler found. Cannot build from source."
-            }
-
-            if (!$installed) {
-                Remove-Item $tmp -Recurse -Force -EA SilentlyContinue
-                return
-            }
+    function Build-FromSource {
+        Step "Building from source (Go required)..."
+        if (-not (Get-Command go -ErrorAction SilentlyContinue)) {
+            throw "Go not found. Install from https://golang.org/dl/ and retry."
+        }
+        $src = Join-Path $TMP "src"
+        New-Item -ItemType Directory $src -Force | Out-Null
+        if (Get-Command git -ErrorAction SilentlyContinue) {
+            git clone --depth 1 "$REPO.git" $src 2>&1 | Out-Null
         } else {
-            # extract
-            info "Extracting..."
-            Expand-Archive -Path $zipPath -DestinationPath $tmp -Force
-
-            $bin = Join-Path $tmp "wut.exe"
-            if (!(Test-Path $bin)) {
-                $found = Get-ChildItem $tmp -Filter "wut.exe" -Recurse | Select-Object -First 1
-                if ($found) { $bin = $found.FullName } else { err "wut.exe not found in archive"; return }
-            }
-
-            if (Test-Path $dest) { Move-Item $dest "$dest.bak" -Force -EA SilentlyContinue }
-            Copy-Item $bin $dest -Force
-            ok "Installed: $dest"
-            $installed = $true
+            $zip = Join-Path $TMP "main.zip"
+            Invoke-WebRequest "$REPO/archive/refs/heads/main.zip" -OutFile $zip
+            Expand-Archive $zip -DestinationPath $TMP -Force
+            Rename-Item (Join-Path $TMP "wut-main") $src
         }
-
-        # ensure PATH
-        Add-UserPath $InstallDir
+        $out = Join-Path $TMP "wut.exe"
+        Push-Location $src
+        $env:CGO_ENABLED = "0"
+        go build -ldflags="-s -w" -o $out .
+        Pop-Location
+        return $out
     }
 
-    # cleanup temp
-    Remove-Item $tmp -Recurse -Force -EA SilentlyContinue
-
-    # --- find wut ---
-    $env:PATH = [Environment]::GetEnvironmentVariable("PATH","Machine") + ";" + [Environment]::GetEnvironmentVariable("PATH","User")
-    $wut = (Get-Command wut -EA SilentlyContinue).Source
-    if (!$wut -and (Test-Path $dest)) { $wut = $dest }
-
-    if (!$wut) {
-        err "Installation failed — wut not found"
-        return
+    function Find-Wut {
+        # Check PATH first
+        $cmd = Get-Command wut -ErrorAction SilentlyContinue
+        if ($cmd) { return $cmd.Source }
+        # Then check install dir
+        $direct = Join-Path $InstallDir "wut.exe"
+        if (Test-Path $direct) { return $direct }
+        return $null
     }
 
-    # verify
-    $v = try { & $wut --version 2>$null | Select-Object -First 1 } catch { "installed" }
-    ok "Verified: $v"
-
-    # --- shell integration ---
-    if (!$NoShell) {
-        info "Setting up shell integration..."
-        try { & $wut install --shell powershell 2>&1 | Out-Null; ok "PowerShell integration done" } catch { warn "Shell integration skipped" }
-        @("bash","zsh","nu") | ForEach-Object {
-            if (Get-Command $_ -EA SilentlyContinue) {
-                try { & $wut install --shell $_ 2>&1 | Out-Null } catch {}
-            }
+    function Add-ToPath {
+        $current = [Environment]::GetEnvironmentVariable("PATH","User")
+        if ($current -notlike "*$InstallDir*") {
+            [Environment]::SetEnvironmentVariable("PATH", "$current;$InstallDir", "User")
+            $env:PATH = "$env:PATH;$InstallDir"
+            Green "Added $InstallDir to PATH"
+        } else {
+            Green "PATH already includes $InstallDir"
         }
     }
 
-    # --- auto init ---
-    if (!$NoInit) {
-        info "Initializing..."
-        try { & $wut init --quick 2>&1 | Out-Null; ok "Initialization complete" } catch { warn "Init skipped (run 'wut init' manually)" }
+    function Setup-Shell ($wut) {
+        if ($NoShell) { return }
+        Step "Setting up shell integration..."
+        try {
+            & $wut install --shell powershell 2>&1 | Out-Null
+            Green "PowerShell integration installed"
+            # Also try bash/zsh if WSL or Git Bash present
+            foreach ($sh in @("bash","zsh","nu")) {
+                if (Get-Command $sh -ErrorAction SilentlyContinue) {
+                    & $wut install --shell $sh 2>&1 | Out-Null
+                    Green "$sh integration installed"
+                }
+            }
+        } catch {
+            Yellow "Shell integration: $_ — run 'wut install' later"
+        }
     }
 
-    # --- done ---
-    Write-Host ""
-    if($c){ Write-Host "  WUT is ready!" -F Green } else { Write-Host "  WUT is ready!" }
-    Write-Host ""
-    Write-Host "  Quick start:"
-    Write-Host "    wut suggest 'git push'     # Get suggestions"
-    Write-Host "    wut explain 'git rebase'   # Explain a command"
-    Write-Host "    wut fix 'gti status'       # Fix typos"
-    Write-Host "    wut --help                 # All commands"
-    Write-Host ""
-
-    if (!(Get-Command wut -EA SilentlyContinue)) {
-        warn "Restart your terminal to activate PATH changes."
+    function Run-Init ($wut) {
+        if ($NoInit) { return }
+        Step "Running 'wut init --quick'..."
+        try {
+            & $wut init --quick
+        } catch {
+            Yellow "Init skipped: $_ — run 'wut init' manually"
+        }
     }
+
+    function Cleanup {
+        Remove-Item $TMP -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # ── Main ────────────────────────────────────────────────────────────────────
+    if ($Help) { Show-Help; return }
+
+    $ErrorActionPreference = "Stop"
+    Show-Banner
+
+    # Resolve version
+    if ($Version -eq "latest") {
+        Step "Fetching latest version..."
+        $Version = Get-LatestTag
+        Green "Latest: $Version"
+    }
+
+    # Create install dir
+    New-Item -ItemType Directory -Force $InstallDir | Out-Null
+    New-Item -ItemType Directory -Force $TMP        | Out-Null
+
+    # Check existing install
+    $existing = Find-Wut
+    if ($existing -and -not $Force) {
+        $ev = (& $existing --version 2>$null) | Select-Object -First 1
+        Yellow "WUT already installed: $ev"
+        $ans = Read-Host "      Reinstall? [y/N]"
+        if ($ans -notmatch '^[Yy]') {
+            Info "Cancelled."; Cleanup; return
+        }
+    }
+
+    # Get binary
+    $bin = $null
+    try   { $bin = Download-Binary $Version }
+    catch {
+        Yellow "Binary download failed: $_"
+        $bin = Build-FromSource
+    }
+
+    # Install
+    Step "Installing to $InstallDir..."
+    $dest = Join-Path $InstallDir "wut.exe"
+    if (Test-Path $dest) {
+        Move-Item $dest "$dest.bak" -Force
+    }
+    Copy-Item $bin $dest -Force
+    Green "Installed: $dest"
+
+    # PATH
+    Add-ToPath
+
+    # Verify
+    Step "Verifying..."
+    $wut = Find-Wut
+    if (-not $wut) {
+        Red "Binary not found after install — open a new terminal and try 'wut --version'"
+        Cleanup; return
+    }
+    $ver = (& $wut --version 2>&1) | Select-Object -First 1
+    Green "Verified: $ver"
+
+    # Shell + Init (the key part — happens automatically)
+    Setup-Shell $wut
+    Run-Init    $wut
+
+    Cleanup
+
+    # Done
+    Cyan ""
+    Cyan "  ╔══════════════════════════════════════════╗"
+    Cyan "  ║   Installation complete!                 ║"
+    Cyan "  ╚══════════════════════════════════════════╝"
+    Cyan ""
+
+    if (Get-Command wut -ErrorAction SilentlyContinue) {
+        Green "WUT is ready. Try:"
+        Info "  wut suggest git"
+        Info "  wut explain 'git rebase'"
+        Info "  wut --help"
+    } else {
+        Yellow "Restart your terminal, then run 'wut --help'"
+    }
+    Cyan ""
 }
 
-Install-WUT @args
+# Entry point — passes all arguments through, works with both:
+#   irm ... | iex
+#   .\install.ps1 -Force
+Invoke-WutInstall @args
