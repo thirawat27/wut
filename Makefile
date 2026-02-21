@@ -31,6 +31,7 @@ GOFMT=$(GOCMD) fmt
 
 # Directories
 BUILD_DIR=./build
+BUILD_WINDOWS_DIR=$(BUILD_DIR)/windows
 DIST_DIR=./dist
 SCRIPTS_DIR=./scripts
 
@@ -51,6 +52,7 @@ NC=\033[0m # No Color
 
 .PHONY: all build clean test deps lint fmt install uninstall run help \
 	build-all build-windows build-linux build-macos build-bsd \
+	build-windows-installer installer-windows \
 	install-local install-global \
 	docker docker-push \
 	release release-check release-goreleaser release-snapshot \
@@ -110,6 +112,30 @@ build-bsd:
 	@GOOS=openbsd GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-openbsd-amd64 .
 	@GOOS=netbsd GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(DIST_DIR)/$(BINARY_NAME)-netbsd-amd64 .
 	@echo "$(GREEN)✓ BSD builds complete$(NC)"
+
+# Build Windows exe for installer (into build/windows/)
+build-windows-installer:
+	@echo "$(BLUE)Building Windows executable for installer...$(NC)"
+	@mkdir -p $(BUILD_WINDOWS_DIR)
+	@GOOS=windows GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o $(BUILD_WINDOWS_DIR)/$(BINARY_NAME).exe .
+	@echo "$(GREEN)✓ Windows build complete: $(BUILD_WINDOWS_DIR)/$(BINARY_NAME).exe$(NC)"
+
+# Build Windows installer using Inno Setup
+installer-windows: build-windows-installer
+	@echo "$(BLUE)Building Windows installer with Inno Setup...$(NC)"
+	@if command -v iscc >/dev/null 2>&1 || command -v "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" >/dev/null 2>&1; then \
+		mkdir -p $(DIST_DIR); \
+		if command -v iscc >/dev/null 2>&1; then \
+			iscc $(SCRIPTS_DIR)/wut-installer.iss; \
+		else \
+			"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" $(SCRIPTS_DIR)/wut-installer.iss; \
+		fi; \
+		echo "$(GREEN)✓ Installer created in $(DIST_DIR)/$(NC)"; \
+	else \
+		echo "$(RED)✗ Inno Setup not found$(NC)"; \
+		echo "$(YELLOW)Please install Inno Setup from: https://jrsoftware.org/isdl.php$(NC)"; \
+		exit 1; \
+	fi
 
 # Clean build artifacts
 clean:
@@ -295,7 +321,9 @@ help:
 	@echo "$(BOLD)Build Targets:$(NC)"
 	@echo "  make build           Build for current platform"
 	@echo "  make build-all       Build for all platforms"
-	@echo "  make build-windows   Build for Windows"
+	@echo "  make build-windows         Build for Windows
+  make build-windows-installer  Build Windows exe for installer (build/windows/)
+  make installer-windows     Build Windows installer with Inno Setup"
 	@echo "  make build-linux     Build for Linux"
 	@echo "  make build-macos     Build for macOS"
 	@echo "  make build-bsd       Build for BSD systems"
