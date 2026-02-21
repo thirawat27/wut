@@ -1,4 +1,4 @@
-// WUT - AI-Powered Command Helper
+// WUT - Command Helper
 // Main entry point for the application
 package main
 

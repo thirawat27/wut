@@ -16,6 +16,7 @@ import (
 	"wut/internal/config"
 	"wut/internal/logger"
 	"wut/internal/tldr"
+	"wut/internal/util"
 )
 
 // suggestCmd represents the suggest command
@@ -187,7 +188,7 @@ func runRawMode(client *tldr.Client, query string) error {
 
 		if len(suggestions) > 0 {
 			fmt.Printf("Command '%s' not found. Did you mean:\n", query)
-			for _, s := range suggestions[:min(len(suggestions), 5)] {
+			for _, s := range suggestions[:util.Min(len(suggestions), 5)] {
 				fmt.Printf("  - %s\n", s)
 			}
 		} else {
@@ -245,13 +246,6 @@ func runCommandMode(client *tldr.Client, query string, cfg *config.Config) error
 	fmt.Println(output)
 
 	return nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // formatSuggestions formats suggestions for terminal output (fallback)

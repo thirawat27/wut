@@ -19,13 +19,6 @@ type Metrics struct {
 	CommandsExplained   atomic.Int64
 	CommandsHistoryView atomic.Int64
 
-	// AI metrics
-	AITrainingRuns    atomic.Int64
-	AIInferenceTime   atomic.Int64 // milliseconds
-	AIModelLoadTime   atomic.Int64 // milliseconds
-	AICacheHits       atomic.Int64
-	AICacheMisses     atomic.Int64
-
 	// Performance metrics
 	RequestCount      atomic.Int64
 	RequestErrors     atomic.Int64
@@ -100,31 +93,6 @@ func (m *Metrics) RecordCommandExplained() {
 // RecordHistoryView increments the history view counter
 func (m *Metrics) RecordHistoryView() {
 	m.CommandsHistoryView.Add(1)
-}
-
-// RecordAITrainingRun records an AI training run
-func (m *Metrics) RecordAITrainingRun() {
-	m.AITrainingRuns.Add(1)
-}
-
-// RecordAIInferenceTime records AI inference time in milliseconds
-func (m *Metrics) RecordAIInferenceTime(duration time.Duration) {
-	m.AIInferenceTime.Add(int64(duration.Milliseconds()))
-}
-
-// RecordAIModelLoadTime records AI model load time in milliseconds
-func (m *Metrics) RecordAIModelLoadTime(duration time.Duration) {
-	m.AIModelLoadTime.Add(int64(duration.Milliseconds()))
-}
-
-// RecordAICacheHit records an AI cache hit
-func (m *Metrics) RecordAICacheHit() {
-	m.AICacheHits.Add(1)
-}
-
-// RecordAICacheMiss records an AI cache miss
-func (m *Metrics) RecordAICacheMiss() {
-	m.AICacheMisses.Add(1)
 }
 
 // RecordRequest records a request
@@ -206,17 +174,6 @@ func (m *Metrics) GetUptime() time.Duration {
 	return time.Since(m.StartTime)
 }
 
-// GetCacheHitRate returns the cache hit rate
-func (m *Metrics) GetCacheHitRate() float64 {
-	hits := m.AICacheHits.Load()
-	misses := m.AICacheMisses.Load()
-	total := hits + misses
-	if total == 0 {
-		return 0
-	}
-	return float64(hits) / float64(total) * 100
-}
-
 // Snapshot returns a snapshot of current metrics
 func (m *Metrics) Snapshot() map[string]interface{} {
 	var memStats runtime.MemStats
@@ -241,14 +198,6 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 			"explained":    m.CommandsExplained.Load(),
 			"history_view": m.CommandsHistoryView.Load(),
 		},
-		"ai": map[string]interface{}{
-			"training_runs":   m.AITrainingRuns.Load(),
-			"inference_time":  m.AIInferenceTime.Load(),
-			"model_load_time": m.AIModelLoadTime.Load(),
-			"cache_hits":      m.AICacheHits.Load(),
-			"cache_misses":    m.AICacheMisses.Load(),
-			"cache_hit_rate":  m.GetCacheHitRate(),
-		},
 		"performance": map[string]interface{}{
 			"requests":           m.RequestCount.Load(),
 			"errors":             m.RequestErrors.Load(),
@@ -256,10 +205,10 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 			"active_connections": m.ActiveConnections.Load(),
 		},
 		"system": map[string]interface{}{
-			"uptime":      m.GetUptime().String(),
-			"version":     m.Version,
-			"commit":      m.Commit,
-			"goroutines":  runtime.NumGoroutine(),
+			"uptime":     m.GetUptime().String(),
+			"version":    m.Version,
+			"commit":     m.Commit,
+			"goroutines": runtime.NumGoroutine(),
 			"memory": map[string]interface{}{
 				"alloc":       memStats.Alloc,
 				"total_alloc": memStats.TotalAlloc,
@@ -350,26 +299,6 @@ func RecordCommandExplained() {
 // RecordHistoryView increments the global history view counter
 func RecordHistoryView() {
 	Get().RecordHistoryView()
-}
-
-// RecordAICacheHit records a global AI cache hit
-func RecordAICacheHit() {
-	Get().RecordAICacheHit()
-}
-
-// RecordAICacheMiss records a global AI cache miss
-func RecordAICacheMiss() {
-	Get().RecordAICacheMiss()
-}
-
-// RecordAITrainingRun records a global AI training run
-func RecordAITrainingRun() {
-	Get().RecordAITrainingRun()
-}
-
-// RecordAIInferenceTime records global AI inference time
-func RecordAIInferenceTime(duration time.Duration) {
-	Get().RecordAIInferenceTime(duration)
 }
 
 // RecordRequest records a global request

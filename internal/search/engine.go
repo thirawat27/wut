@@ -4,13 +4,14 @@ package search
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
-	"wut/internal/ai"
 	"wut/internal/config"
+	"wut/internal/concurrency"
 	"wut/internal/db"
 	"wut/pkg/fuzzy"
 )
@@ -19,12 +20,11 @@ import (
 type Source string
 
 const (
-	SourceHistory   Source = "history"
-	SourceAI        Source = "ai"
-	SourceBuiltin   Source = "builtin"
-	SourceContext   Source = "context"
-	SourceAlias     Source = "alias"
-	SourcePath      Source = "path"
+	SourceHistory Source = "history"
+	SourceBuiltin Source = "builtin"
+	SourceContext Source = "context"
+	SourceAlias   Source = "alias"
+	SourcePath    Source = "path"
 )
 
 // Result represents a search result
@@ -34,14 +34,14 @@ type Result struct {
 	Score       float64
 	Source      Source
 	Relevance   float64
-	
+
 	// Additional metadata
-	UsageCount    int
-	LastUsed      time.Time
-	IsDangerous   bool
-	Category      string
-	Tags          []string
-	
+	UsageCount  int
+	LastUsed    time.Time
+	IsDangerous bool
+	Category    string
+	Tags        []string
+
 	// Match information
 	Match         *fuzzy.Match
 	MatchedTokens []string
@@ -49,13 +49,13 @@ type Result struct {
 
 // Query represents a search query
 type Query struct {
-	Text          string
-	Context       map[string]interface{}
-	Limit         int
-	Sources       []Source
-	MinScore      float64
-	SortBy        SortCriteria
-	Filters       map[string]interface{}
+	Text     string
+	Context  map[string]interface{}
+	Limit    int
+	Sources  []Source
+	MinScore float64
+	SortBy   SortCriteria
+	Filters  map[string]interface{}
 }
 
 // SortCriteria represents how to sort results
@@ -71,18 +71,17 @@ const (
 
 // Engine provides comprehensive search functionality
 type Engine struct {
-	config      *config.Config
-	storage     *db.Storage
-	aiModel     *ai.Model
-	matcher     *fuzzy.Matcher
-	
+	config  *config.Config
+	storage *db.Storage
+	matcher *fuzzy.Matcher
+
 	// Built-in command database
 	builtinCmds map[string]BuiltinCommand
-	
+
 	// Cache for recent searches
-	cache       map[string]*cachedResult
-	cacheMu     sync.RWMutex
-	cacheTTL    time.Duration
+	cache    map[string]*cachedResult
+	cacheMu  sync.RWMutex
+	cacheTTL time.Duration
 }
 
 // BuiltinCommand represents a built-in shell command
@@ -110,7 +109,7 @@ func NewEngine(cfg *config.Config, storage *db.Storage) (*Engine, error) {
 		cfg.Fuzzy.Threshold,
 	)
 	matcher.SetAlgorithm(fuzzy.AlgorithmHybrid)
-	
+
 	engine := &Engine{
 		config:      cfg,
 		storage:     storage,
@@ -119,13 +118,8 @@ func NewEngine(cfg *config.Config, storage *db.Storage) (*Engine, error) {
 		cache:       make(map[string]*cachedResult),
 		cacheTTL:    5 * time.Minute,
 	}
-	
-	return engine, nil
-}
 
-// SetAIModel sets the AI model for AI-powered search
-func (e *Engine) SetAIModel(model *ai.Model) {
-	e.aiModel = model
+	return engine, nil
 }
 
 // Search performs a comprehensive search across all sources
@@ -133,23 +127,23 @@ func (e *Engine) Search(ctx context.Context, query Query) ([]Result, error) {
 	if query.Text == "" {
 		return e.getDefaultSuggestions(query)
 	}
-	
+
 	// Check cache first
 	if cached := e.getCached(query.Text); cached != nil {
 		return e.filterAndSort(cached, query), nil
 	}
-	
+
 	// Determine which sources to search
 	sources := query.Sources
 	if len(sources) == 0 {
-		sources = []Source{SourceHistory, SourceBuiltin, SourceAI}
+		sources = []Source{SourceHistory, SourceBuiltin}
 	}
-	
+
 	// Search all sources concurrently
 	var wg sync.WaitGroup
 	resultChan := make(chan []Result, len(sources))
 	errChan := make(chan error, len(sources))
-	
+
 	for _, source := range sources {
 		wg.Add(1)
 		go func(src Source) {
@@ -162,25 +156,25 @@ func (e *Engine) Search(ctx context.Context, query Query) ([]Result, error) {
 			resultChan <- results
 		}(source)
 	}
-	
+
 	// Close channels when all goroutines complete
 	go func() {
 		wg.Wait()
 		close(resultChan)
 		close(errChan)
 	}()
-	
+
 	// Collect results
 	var allResults []Result
 	done := make(chan struct{})
-	
+
 	go func() {
 		for results := range resultChan {
 			allResults = append(allResults, results...)
 		}
 		close(done)
 	}()
-	
+
 	// Check for errors with timeout
 	select {
 	case <-done:
@@ -192,13 +186,13 @@ func (e *Engine) Search(ctx context.Context, query Query) ([]Result, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	
+
 	// Deduplicate and merge results
 	allResults = e.deduplicate(allResults)
-	
+
 	// Cache results
 	e.cacheResults(query.Text, allResults)
-	
+
 	return e.filterAndSort(allResults, query), nil
 }
 
@@ -206,25 +200,17 @@ func (e *Engine) Search(ctx context.Context, query Query) ([]Result, error) {
 func (e *Engine) SearchInteractive(ctx context.Context, queryText string, sources []Source) ([]Result, error) {
 	query := Query{
 		Text:     queryText,
-		Limit:    e.config.AI.Inference.MaxSuggestions,
+		Limit:    10,
 		Sources:  sources,
 		MinScore: e.config.Fuzzy.Threshold,
 		SortBy:   SortByRelevance,
 	}
-	
+
 	results, err := e.Search(ctx, query)
 	if err != nil {
 		return nil, err
 	}
-	
-	// If no results and query is not empty, try AI
-	if len(results) == 0 && queryText != "" && e.aiModel != nil {
-		aiResults, err := e.searchAI(ctx, query)
-		if err == nil && len(aiResults) > 0 {
-			results = append(results, aiResults...)
-		}
-	}
-	
+
 	return results, nil
 }
 
@@ -235,11 +221,6 @@ func (e *Engine) searchSource(ctx context.Context, source Source, query Query) (
 		return e.searchHistory(ctx, query)
 	case SourceBuiltin:
 		return e.searchBuiltin(query)
-	case SourceAI:
-		if e.aiModel != nil {
-			return e.searchAI(ctx, query)
-		}
-		return nil, nil
 	case SourceAlias:
 		return e.searchAliases(query)
 	case SourcePath:
@@ -255,17 +236,17 @@ func (e *Engine) searchHistory(ctx context.Context, query Query) ([]Result, erro
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var results []Result
 	seen := make(map[string]bool)
-	
+
 	for _, cmd := range history {
 		// Skip duplicates
 		if seen[cmd.Command] {
 			continue
 		}
 		seen[cmd.Command] = true
-		
+
 		match := e.matcher.Match(query.Text, cmd.Command)
 		if match.Confidence >= e.config.Fuzzy.Threshold {
 			results = append(results, Result{
@@ -280,21 +261,21 @@ func (e *Engine) searchHistory(ctx context.Context, query Query) ([]Result, erro
 			})
 		}
 	}
-	
+
 	return results, nil
 }
 
 // searchBuiltin searches built-in commands
 func (e *Engine) searchBuiltin(query Query) ([]Result, error) {
 	var results []Result
-	
+
 	for name, cmd := range e.builtinCmds {
 		// Search in name
 		nameMatch := e.matcher.Match(query.Text, name)
-		
+
 		// Search in description
 		descMatch := e.matcher.Match(query.Text, cmd.Description)
-		
+
 		// Search in tags
 		var tagScore float64
 		for _, tag := range cmd.Tags {
@@ -302,20 +283,20 @@ func (e *Engine) searchBuiltin(query Query) ([]Result, error) {
 				tagScore = m.Confidence
 			}
 		}
-		
+
 		// Use best match
 		bestScore := nameMatch.Confidence
 		bestMatch := nameMatch
-		
+
 		if descMatch.Confidence > bestScore {
 			bestScore = descMatch.Confidence
 			bestMatch = descMatch
 		}
-		
+
 		if tagScore > bestScore {
 			bestScore = tagScore
 		}
-		
+
 		if bestScore >= e.config.Fuzzy.Threshold {
 			results = append(results, Result{
 				Command:     name,
@@ -330,38 +311,7 @@ func (e *Engine) searchBuiltin(query Query) ([]Result, error) {
 			})
 		}
 	}
-	
-	return results, nil
-}
 
-// searchAI performs AI-powered search
-func (e *Engine) searchAI(ctx context.Context, query Query) ([]Result, error) {
-	if e.aiModel == nil {
-		return nil, nil
-	}
-	
-	aiReq := ai.SuggestRequest{
-		Query:      query.Text,
-		MaxResults: query.Limit,
-		Confidence: e.config.AI.Inference.ConfidenceThreshold,
-	}
-	
-	aiResp, err := e.aiModel.Suggest(ctx, aiReq)
-	if err != nil {
-		return nil, err
-	}
-	
-	var results []Result
-	for _, s := range aiResp.Suggestions {
-		results = append(results, Result{
-			Command:     s.Command,
-			Description: s.Description,
-			Score:       s.Confidence,
-			Source:      SourceAI,
-			Relevance:   s.Confidence,
-		})
-	}
-	
 	return results, nil
 }
 
@@ -380,23 +330,23 @@ func (e *Engine) searchPath(query Query) ([]Result, error) {
 // getDefaultSuggestions returns default suggestions when query is empty
 func (e *Engine) getDefaultSuggestions(query Query) ([]Result, error) {
 	ctx := context.Background()
-	
+
 	// Get recent and frequent commands from history
 	history, err := e.storage.GetHistory(ctx, 100)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var results []Result
 	seen := make(map[string]bool)
-	
+
 	// Add frequent commands
 	for _, cmd := range history {
 		if seen[cmd.Command] {
 			continue
 		}
 		seen[cmd.Command] = true
-		
+
 		// Calculate score based on frequency and recency
 		score := 0.5
 		if cmd.UsageCount > 0 {
@@ -405,7 +355,7 @@ func (e *Engine) getDefaultSuggestions(query Query) ([]Result, error) {
 		if time.Since(cmd.LastUsed) < 24*time.Hour {
 			score += 0.2
 		}
-		
+
 		results = append(results, Result{
 			Command:     cmd.Command,
 			Description: cmd.Description,
@@ -415,19 +365,19 @@ func (e *Engine) getDefaultSuggestions(query Query) ([]Result, error) {
 			UsageCount:  cmd.UsageCount,
 			LastUsed:    cmd.LastUsed,
 		})
-		
+
 		if len(results) >= query.Limit && query.Limit > 0 {
 			break
 		}
 	}
-	
+
 	return results, nil
 }
 
 // deduplicate removes duplicate results, keeping the one with highest score
 func (e *Engine) deduplicate(results []Result) []Result {
 	seen := make(map[string]*Result)
-	
+
 	for i := range results {
 		cmd := results[i].Command
 		if existing, ok := seen[cmd]; ok {
@@ -444,13 +394,13 @@ func (e *Engine) deduplicate(results []Result) []Result {
 			seen[cmd] = &results[i]
 		}
 	}
-	
+
 	// Convert back to slice
 	deduplicated := make([]Result, 0, len(seen))
 	for _, r := range seen {
 		deduplicated = append(deduplicated, *r)
 	}
-	
+
 	return deduplicated
 }
 
@@ -463,7 +413,7 @@ func (e *Engine) filterAndSort(results []Result, query Query) []Result {
 			filtered = append(filtered, r)
 		}
 	}
-	
+
 	// Sort results
 	switch query.SortBy {
 	case SortByScore:
@@ -487,12 +437,12 @@ func (e *Engine) filterAndSort(results []Result, query Query) []Result {
 			return filtered[i].Relevance > filtered[j].Relevance
 		})
 	}
-	
+
 	// Apply limit
 	if query.Limit > 0 && len(filtered) > query.Limit {
 		filtered = filtered[:query.Limit]
 	}
-	
+
 	return filtered
 }
 
@@ -500,7 +450,7 @@ func (e *Engine) filterAndSort(results []Result, query Query) []Result {
 func (e *Engine) getCached(query string) []Result {
 	e.cacheMu.RLock()
 	defer e.cacheMu.RUnlock()
-	
+
 	if cached, ok := e.cache[query]; ok {
 		if time.Since(cached.timestamp) < e.cacheTTL {
 			return cached.results
@@ -512,7 +462,7 @@ func (e *Engine) getCached(query string) []Result {
 func (e *Engine) cacheResults(query string, results []Result) {
 	e.cacheMu.Lock()
 	defer e.cacheMu.Unlock()
-	
+
 	e.cache[query] = &cachedResult{
 		results:   results,
 		timestamp: time.Now(),
@@ -524,7 +474,7 @@ func (e *Engine) cacheResults(query string, results []Result) {
 func (e *Engine) ClearCache() {
 	e.cacheMu.Lock()
 	defer e.cacheMu.Unlock()
-	
+
 	e.cache = make(map[string]*cachedResult)
 }
 
@@ -719,6 +669,103 @@ func initializeBuiltinCommands() map[string]BuiltinCommand {
 			Examples:    []string{"code .", "code file.txt"},
 		},
 	}
+}
+
+// SearchConcurrent performs search using concurrency package for better parallelism
+func (e *Engine) SearchConcurrent(ctx context.Context, query Query) ([]Result, error) {
+	if query.Text == "" {
+		return e.getDefaultSuggestions(query)
+	}
+
+	// Check cache first
+	if cached := e.getCached(query.Text); cached != nil {
+		return e.filterAndSort(cached, query), nil
+	}
+
+	// Determine which sources to search
+	sources := query.Sources
+	if len(sources) == 0 {
+		sources = []Source{SourceHistory, SourceBuiltin}
+	}
+
+	// Create search tasks for each source
+	searchTasks := make([]func(context.Context) ([]Result, error), len(sources))
+	for i, source := range sources {
+		src := source // Capture for closure
+		searchTasks[i] = func(ctx context.Context) ([]Result, error) {
+			return e.searchSource(ctx, src, query)
+		}
+	}
+
+	// Execute searches concurrently
+	workers := runtime.NumCPU()
+	if len(sources) < workers {
+		workers = len(sources)
+	}
+
+	results, err := concurrency.Map(ctx, searchTasks, func(fn func(context.Context) ([]Result, error)) ([]Result, error) {
+		return fn(ctx)
+	}, workers)
+
+	if err != nil {
+		return nil, fmt.Errorf("search failed: %w", err)
+	}
+
+	// Flatten results
+	var allResults []Result
+	for _, r := range results {
+		allResults = append(allResults, r...)
+	}
+
+	// Deduplicate and merge results
+	allResults = e.deduplicate(allResults)
+
+	// Cache results
+	e.cacheResults(query.Text, allResults)
+
+	return e.filterAndSort(allResults, query), nil
+}
+
+// SearchParallel searches multiple queries in parallel
+func (e *Engine) SearchParallel(ctx context.Context, queries []Query) ([][]Result, error) {
+	if len(queries) == 0 {
+		return [][]Result{}, nil
+	}
+
+	workers := runtime.NumCPU()
+	if len(queries) < workers {
+		workers = len(queries)
+	}
+
+	return concurrency.Map(ctx, queries, func(q Query) ([]Result, error) {
+		return e.Search(ctx, q)
+	}, workers)
+}
+
+// BatchSearch performs batch search with concurrent processing
+func (e *Engine) BatchSearch(ctx context.Context, queries []Query) ([]Result, error) {
+	// Use FanOut for processing
+	processor := concurrency.NewFanOut[Query](runtime.NumCPU(), func(ctx context.Context, q Query) error {
+		_, err := e.Search(ctx, q)
+		return err
+	})
+
+	err := processor.Process(ctx, queries)
+	if err != nil {
+		return nil, err
+	}
+
+	// Aggregate all results
+	var allResults []Result
+	for _, q := range queries {
+		results, err := e.Search(ctx, q)
+		if err != nil {
+			continue
+		}
+		allResults = append(allResults, results...)
+	}
+
+	return e.deduplicate(allResults), nil
 }
 
 func minFloat(a, b float64) float64 {

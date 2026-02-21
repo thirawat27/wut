@@ -29,10 +29,9 @@ var (
 	// rootCmd represents the base command
 	rootCmd = &cobra.Command{
 		Use:   "wut",
-		Short: "AI-Powered Command Helper",
-		Long: `WUT is an intelligent command line assistant that helps you 
-find the right commands, correct typos, and learn new shell commands 
-through natural language queries.`,
+		Short: "Command Helper",
+		Long: `WUT is a command line assistant that helps you 
+find the right commands, correct typos, and learn new shell commands.`,
 		Version: fmt.Sprintf("%s (commit: %s, built: %s)", Version, Commit, BuildTime),
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return initialize(cmd.Context())

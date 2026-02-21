@@ -14,6 +14,7 @@ import (
 
 	"wut/internal/config"
 	"wut/internal/tldr"
+	"wut/internal/util"
 )
 
 // tldrCmd represents the tldr command
@@ -289,7 +290,7 @@ func formatSyncResult(result *tldr.SyncResult) string {
 			Foreground(lipgloss.Color("#EF4444")).
 			Render("Errors:"))
 		b.WriteString("\n")
-		for _, err := range result.Errors[:min(len(result.Errors), 5)] {
+		for _, err := range result.Errors[:util.Min(len(result.Errors), 5)] {
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6B7280")).
 				Render(fmt.Sprintf("  • %v", err)))

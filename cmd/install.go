@@ -90,7 +90,11 @@ func installShellIntegration(sh string) error {
 	}
 
 	// Check if already installed
-	if isAlreadyInstalled(configFile) {
+	installed, err := isAlreadyInstalled(configFile)
+	if err != nil {
+		return err
+	}
+	if installed {
 		fmt.Println("✅ WUT integration is already installed")
 		return nil
 	}
@@ -243,20 +247,39 @@ func getShellConfigFile(sh string) (string, error) {
 		return filepath.Join(home, ".config", "fish", "config.fish"), nil
 	case "powershell", "pwsh":
 		if runtime.GOOS == "windows" {
-			return filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"), nil
+			// Try PowerShell Core first, then Windows PowerShell
+			psCorePath := filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
+			psWinPath := filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
+			
+			// Check which one exists, prefer PowerShell Core
+			if _, err := os.Stat(psCorePath); err == nil {
+				return psCorePath, nil
+			}
+			// Check Windows PowerShell
+			if _, err := os.Stat(psWinPath); err == nil {
+				return psWinPath, nil
+			}
+			// Default to PowerShell Core path (newer)
+			return psCorePath, nil
 		}
+		// Linux/macOS PowerShell
 		return filepath.Join(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1"), nil
 	default:
 		return "", fmt.Errorf("unsupported shell: %s", sh)
 	}
 }
 
-func isAlreadyInstalled(configFile string) bool {
+func isAlreadyInstalled(configFile string) (bool, error) {
 	content, err := os.ReadFile(configFile)
 	if err != nil {
-		return false
+		if os.IsNotExist(err) {
+			// File doesn't exist, so not installed
+			return false, nil
+		}
+		// Other error (permission denied, etc.)
+		return false, fmt.Errorf("cannot read shell config: %w", err)
 	}
-	return strings.Contains(string(content), "# WUT Shell Integration")
+	return strings.Contains(string(content), "# WUT Shell Integration"), nil
 }
 
 func generateShellCode(sh string) string {

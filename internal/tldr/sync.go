@@ -4,17 +4,21 @@ package tldr
 import (
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"wut/internal/concurrency"
 	"wut/internal/logger"
 )
 
 // SyncManager manages syncing TLDR pages to local storage
 type SyncManager struct {
-	client  *Client
-	storage *Storage
-	log     *logger.Logger
+	client    *Client
+	storage   *Storage
+	log       *logger.Logger
+	workerPool *concurrency.Pool
 }
 
 // SyncOptions contains options for syncing
@@ -23,6 +27,7 @@ type SyncOptions struct {
 	Commands    []string
 	Concurrency int
 	ForceUpdate bool
+	OnProgress  func(current, total int, command string)
 }
 
 // SyncResult contains the result of a sync operation
@@ -36,10 +41,14 @@ type SyncResult struct {
 
 // NewSyncManager creates a new sync manager
 func NewSyncManager(storage *Storage) *SyncManager {
+	pool := concurrency.NewPool(concurrency.WithWorkerCount(runtime.NumCPU() * 2))
+	pool.Start()
+
 	return &SyncManager{
-		client:  NewClient(),
-		storage: storage,
-		log:     logger.With("tldr-sync"),
+		client:     NewClient(),
+		storage:    storage,
+		log:        logger.With("tldr-sync"),
+		workerPool: pool,
 	}
 }
 
@@ -48,56 +57,89 @@ func (sm *SyncManager) SetClient(client *Client) {
 	sm.client = client
 }
 
+// Stop stops the sync manager and its worker pool
+func (sm *SyncManager) Stop() {
+	if sm.workerPool != nil {
+		sm.workerPool.Stop()
+	}
+}
+
 // SyncAll syncs all common commands to local storage
 func (sm *SyncManager) SyncAll(ctx context.Context) (*SyncResult, error) {
 	return sm.SyncCommands(ctx, nil)
 }
 
-// SyncCommands syncs specific commands to local storage
+// SyncCommands syncs specific commands to local storage with high concurrency
 func (sm *SyncManager) SyncCommands(ctx context.Context, commands []string) (*SyncResult, error) {
+	return sm.SyncCommandsWithOptions(ctx, SyncOptions{Commands: commands})
+}
+
+// SyncCommandsWithOptions syncs commands with detailed options
+func (sm *SyncManager) SyncCommandsWithOptions(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
 	start := time.Now()
 	result := &SyncResult{}
 
 	// If no commands specified, get popular ones
-	if len(commands) == 0 {
+	if len(opts.Commands) == 0 {
 		var err error
-		commands, err = sm.client.GetAvailableCommands(ctx)
+		opts.Commands, err = sm.client.GetAvailableCommands(ctx)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get command list: %w", err)
 		}
 	}
 
-	sm.log.Info("starting sync", "commands", len(commands))
+	sm.log.Info("starting sync", "commands", len(opts.Commands), "concurrency", opts.Concurrency)
 
-	// Use worker pool for concurrent downloads
-	concurrency := 5
-	semaphore := make(chan struct{}, concurrency)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
+	totalCommands := int64(len(opts.Commands))
+	var currentCount int64
 
-	for _, cmd := range commands {
-		wg.Add(1)
-		go func(command string) {
-			defer wg.Done()
-
-			semaphore <- struct{}{}
-			defer func() { <-semaphore }()
-
+	// Create task function for each command
+	taskFunc := func(command string) func(context.Context) error {
+		return func(ctx context.Context) error {
 			err := sm.syncCommand(ctx, command)
-			mu.Lock()
-			defer mu.Unlock()
 
-			if err != nil {
-				result.Failed++
-				result.Errors = append(result.Errors, fmt.Errorf("%s: %w", command, err))
-				sm.log.Warn("failed to sync command", "command", command, "error", err)
-			} else {
-				result.Downloaded++
+			// Update progress
+			current := atomic.AddInt64(&currentCount, 1)
+			if opts.OnProgress != nil {
+				opts.OnProgress(int(current), int(totalCommands), command)
 			}
-		}(cmd)
+
+			return err
+		}
 	}
 
-	wg.Wait()
+	// Create tasks
+	tasks := make([]func(context.Context) error, len(opts.Commands))
+	for i, cmd := range opts.Commands {
+		tasks[i] = taskFunc(cmd)
+	}
+
+	// Determine concurrency level
+	workers := opts.Concurrency
+	if workers <= 0 {
+		workers = runtime.NumCPU() * 2 // Use 2x CPU cores for I/O bound operations
+	}
+
+	// Execute tasks concurrently using our Map function
+	results, err := concurrency.Map(ctx, tasks, func(fn func(context.Context) error) (error, error) {
+		return fn(ctx), nil
+	}, workers)
+
+	if err != nil {
+		sm.log.Warn("some sync operations failed", "error", err)
+	}
+
+	// Process results
+	for i, res := range results {
+		if res != nil {
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Errorf("%s: %w", opts.Commands[i], res))
+			sm.log.Warn("failed to sync command", "command", opts.Commands[i], "error", res)
+		} else {
+			result.Downloaded++
+		}
+	}
+
 	result.Duration = time.Since(start)
 
 	// Update metadata
@@ -119,6 +161,49 @@ func (sm *SyncManager) SyncCommands(ctx context.Context, commands []string) (*Sy
 	return result, nil
 }
 
+// SyncCommandsBatch syncs commands in batches for better memory efficiency
+func (sm *SyncManager) SyncCommandsBatch(ctx context.Context, commands []string, batchSize int) (*SyncResult, error) {
+	if batchSize <= 0 {
+		batchSize = 50
+	}
+
+	totalResult := &SyncResult{}
+	start := time.Now()
+
+	for i := 0; i < len(commands); i += batchSize {
+		end := i + batchSize
+		if end > len(commands) {
+			end = len(commands)
+		}
+
+		batch := commands[i:end]
+		sm.log.Debug("processing batch", "batch", i/batchSize+1, "commands", len(batch))
+
+		result, err := sm.SyncCommands(ctx, batch)
+		if err != nil {
+			sm.log.Warn("batch sync failed", "batch", i/batchSize+1, "error", err)
+		}
+
+		totalResult.Downloaded += result.Downloaded
+		totalResult.Failed += result.Failed
+		totalResult.Errors = append(totalResult.Errors, result.Errors...)
+	}
+
+	totalResult.Duration = time.Since(start)
+
+	// Update metadata
+	meta := &Metadata{
+		LastSync:   time.Now(),
+		TotalPages: totalResult.Downloaded,
+		Platforms:  []string{PlatformCommon, PlatformLinux, PlatformMacOS, PlatformWindows},
+	}
+	if err := sm.storage.SaveMetadata(meta); err != nil {
+		sm.log.Warn("failed to save metadata", "error", err)
+	}
+
+	return totalResult, nil
+}
+
 // syncCommand syncs a single command
 func (sm *SyncManager) syncCommand(ctx context.Context, command string) error {
 	page, err := sm.client.GetPageAnyPlatform(ctx, command)
@@ -127,6 +212,67 @@ func (sm *SyncManager) syncCommand(ctx context.Context, command string) error {
 	}
 
 	return sm.storage.SavePage(page)
+}
+
+// SyncPlatforms syncs commands for specific platforms concurrently
+func (sm *SyncManager) SyncPlatforms(ctx context.Context, platforms []string) (*SyncResult, error) {
+	if len(platforms) == 0 {
+		platforms = []string{PlatformCommon, PlatformLinux, PlatformMacOS, PlatformWindows}
+	}
+
+	sm.log.Info("syncing platforms", "platforms", platforms)
+
+	// Use Parallel to sync all platforms concurrently
+	syncFuncs := make([]func() error, len(platforms))
+	results := make([]*SyncResult, len(platforms))
+	var mu sync.Mutex
+
+	for i, platform := range platforms {
+		idx := i
+		plat := platform
+		syncFuncs[i] = func() error {
+			commands, err := sm.getPlatformCommands(ctx, plat)
+			if err != nil {
+				return fmt.Errorf("failed to get commands for %s: %w", plat, err)
+			}
+
+			result, err := sm.SyncCommands(ctx, commands)
+			if err != nil {
+				return err
+			}
+
+			mu.Lock()
+			results[idx] = result
+			mu.Unlock()
+
+			return nil
+		}
+	}
+
+	errs := concurrency.Parallel(ctx, syncFuncs...)
+
+	// Aggregate results
+	totalResult := &SyncResult{}
+	for _, result := range results {
+		if result != nil {
+			totalResult.Downloaded += result.Downloaded
+			totalResult.Failed += result.Failed
+			totalResult.Errors = append(totalResult.Errors, result.Errors...)
+		}
+	}
+
+	if len(errs) > 0 {
+		return totalResult, fmt.Errorf("platform sync completed with %d errors", len(errs))
+	}
+
+	return totalResult, nil
+}
+
+// getPlatformCommands gets available commands for a platform
+func (sm *SyncManager) getPlatformCommands(ctx context.Context, platform string) ([]string, error) {
+	// This is a simplified version - in reality, you'd fetch from TLDR API
+	// For now, return common commands
+	return sm.client.GetAvailableCommands(ctx)
 }
 
 // SyncPopular syncs popular/common commands
@@ -182,4 +328,13 @@ func (sm *SyncManager) AutoSync(ctx context.Context, maxAge time.Duration) (*Syn
 
 	sm.log.Info("local database is stale, syncing...")
 	return sm.SyncPopular(ctx)
+}
+
+// SyncWithProgress syncs with progress reporting
+func (sm *SyncManager) SyncWithProgress(ctx context.Context, commands []string, onProgress func(current, total int, command string)) (*SyncResult, error) {
+	opts := SyncOptions{
+		Commands:   commands,
+		OnProgress: onProgress,
+	}
+	return sm.SyncCommandsWithOptions(ctx, opts)
 }

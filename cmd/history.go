@@ -10,6 +10,7 @@ import (
 
 	"wut/internal/config"
 	"wut/internal/db"
+	"wut/internal/history"
 	"wut/internal/logger"
 	"wut/internal/metrics"
 )
@@ -22,17 +23,20 @@ var historyCmd = &cobra.Command{
 	Example: `  wut history
   wut history --limit 50
   wut history --search "docker"
-  wut history --stats`,
+  wut history --stats
+  wut history --import-shell`,
 	RunE: runHistory,
 }
 
 var (
-	historyLimit   int
-	historySearch  string
-	historyStats   bool
-	historyClear   bool
-	historyExport  string
-	historyImport  string
+	historyLimit       int
+	historySearch      string
+	historyStats       bool
+	historyClear       bool
+	historyExport      string
+	historyImport      string
+	historyImportShell bool
+	historyWorkers     int
 )
 
 func init() {
@@ -44,6 +48,8 @@ func init() {
 	historyCmd.Flags().BoolVar(&historyClear, "clear", false, "clear history")
 	historyCmd.Flags().StringVarP(&historyExport, "export", "e", "", "export history to file")
 	historyCmd.Flags().StringVarP(&historyImport, "import", "i", "", "import history from file")
+	historyCmd.Flags().BoolVar(&historyImportShell, "import-shell", false, "import from shell history (bash, zsh, fish, powershell)")
+	historyCmd.Flags().IntVar(&historyWorkers, "workers", 0, "number of concurrent workers (0 = auto)")
 }
 
 func runHistory(cmd *cobra.Command, args []string) error {
@@ -88,6 +94,11 @@ func runHistory(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("History imported from %s\n", historyImport)
 		return nil
+	}
+
+	// Handle import from shell
+	if historyImportShell {
+		return importShellHistory(ctx, storage)
 	}
 
 	// Show statistics
@@ -171,6 +182,69 @@ func showHistoryStats(ctx context.Context, storage *db.Storage) error {
 
 	// Record metrics
 	metrics.RecordHistoryView()
+
+	return nil
+}
+
+// importShellHistory imports history from shell history files
+func importShellHistory(ctx context.Context, storage *db.Storage) error {
+	// Create history reader with concurrent workers
+	workers := historyWorkers
+	if workers <= 0 {
+		workers = 0 // Auto-detect (uses runtime.NumCPU())
+	}
+
+	reader := history.NewReader(history.WithWorkers(workers))
+
+	// Detect available shells
+	shells := reader.DetectShells()
+	if len(shells) == 0 {
+		return fmt.Errorf("no shell history files detected. Make sure you have bash, zsh, fish, or PowerShell history")
+	}
+
+	fmt.Printf("Detected shells:\n")
+	for shellType, path := range shells {
+		fmt.Printf("  - %s: %s\n", shellType, path)
+	}
+	fmt.Println()
+
+	// Read all histories concurrently
+	fmt.Println("Reading shell histories...")
+	entries, err := reader.ReadAll(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to read shell histories: %w", err)
+	}
+
+	if len(entries) == 0 {
+		fmt.Println("No history entries found in shell files")
+		return nil
+	}
+
+	// Show stats
+	stats := reader.GetStats(entries)
+	fmt.Printf("\nShell History Statistics:\n")
+	fmt.Printf("Total Entries: %d\n", stats.TotalEntries)
+	fmt.Printf("Unique Commands: %d\n", stats.UniqueCommands)
+	for shellType, count := range stats.ByShell {
+		fmt.Printf("  %s: %d entries\n", shellType, count)
+	}
+	if !stats.NewestTime.IsZero() {
+		fmt.Printf("Time Range: %s to %s\n",
+			stats.OldestTime.Format("2006-01-02"),
+			stats.NewestTime.Format("2006-01-02"))
+	}
+	fmt.Println()
+
+	// Import to database
+	fmt.Println("Importing to WUT database...")
+	imported, err := reader.ImportToDB(ctx, storage, entries)
+	if err != nil {
+		return fmt.Errorf("failed to import history: %w", err)
+	}
+
+	fmt.Printf("\n✅ Successfully imported %d commands from shell history\n", imported)
+	fmt.Println("\nTip: Use 'wut history' to view your imported history")
+	fmt.Println("     Use 'wut suggest' to get AI-powered suggestions based on your history")
 
 	return nil
 }

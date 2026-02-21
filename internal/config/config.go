@@ -3,26 +3,28 @@ package config
 
 import (
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds all configuration for the application
 type Config struct {
-	App       AppConfig       `mapstructure:"app"`
-	AI        AIConfig        `mapstructure:"ai"`
-	NLP       NLPConfig       `mapstructure:"nlp"`
-	Fuzzy     FuzzyConfig     `mapstructure:"fuzzy"`
-	UI        UIConfig        `mapstructure:"ui"`
-	Database  DatabaseConfig  `mapstructure:"database"`
-	History   HistoryConfig   `mapstructure:"history"`
-	Context   ContextConfig   `mapstructure:"context"`
-	Shell     ShellConfig     `mapstructure:"shell"`
-	Privacy   PrivacyConfig   `mapstructure:"privacy"`
-	Logging   LoggingConfig   `mapstructure:"logging"`
-	TLDR      TLDRConfig      `mapstructure:"tldr"`
+	App      AppConfig      `mapstructure:"app"`
+	Fuzzy    FuzzyConfig    `mapstructure:"fuzzy"`
+	UI       UIConfig       `mapstructure:"ui"`
+	Database DatabaseConfig `mapstructure:"database"`
+	History  HistoryConfig  `mapstructure:"history"`
+	Context  ContextConfig  `mapstructure:"context"`
+	Shell    ShellConfig    `mapstructure:"shell"`
+	Privacy  PrivacyConfig  `mapstructure:"privacy"`
+	Logging  LoggingConfig  `mapstructure:"logging"`
+	TLDR     TLDRConfig     `mapstructure:"tldr"`
 }
 
 // AppConfig holds application settings
@@ -30,51 +32,6 @@ type AppConfig struct {
 	Name    string `mapstructure:"name"`
 	Version string `mapstructure:"version"`
 	Debug   bool   `mapstructure:"debug"`
-}
-
-// AIConfig holds AI/ML settings
-type AIConfig struct {
-	Enabled   bool          `mapstructure:"enabled"`
-	Model     ModelConfig   `mapstructure:"model"`
-	Training  TrainingConfig `mapstructure:"training"`
-	Inference InferenceConfig `mapstructure:"inference"`
-}
-
-// ModelConfig holds model settings
-type ModelConfig struct {
-	Type                 string `mapstructure:"type"`
-	Version              string `mapstructure:"version"`
-	Path                 string `mapstructure:"path"`
-	EmbeddingDimensions  int    `mapstructure:"embedding_dimensions"`
-	HiddenLayers         int    `mapstructure:"hidden_layers"`
-	HiddenUnits          int    `mapstructure:"hidden_units"`
-	Quantized            bool   `mapstructure:"quantized"`
-}
-
-// TrainingConfig holds training settings
-type TrainingConfig struct {
-	Epochs           int     `mapstructure:"epochs"`
-	LearningRate     float64 `mapstructure:"learning_rate"`
-	BatchSize        int     `mapstructure:"batch_size"`
-	AutoTrain        bool    `mapstructure:"auto_train"`
-	MinHistoryEntries int    `mapstructure:"min_history_entries"`
-}
-
-// InferenceConfig holds inference settings
-type InferenceConfig struct {
-	MaxSuggestions      int     `mapstructure:"max_suggestions"`
-	ConfidenceThreshold float64 `mapstructure:"confidence_threshold"`
-	CacheEnabled        bool    `mapstructure:"cache_enabled"`
-	CacheSize           int     `mapstructure:"cache_size"`
-}
-
-// NLPConfig holds NLP settings
-type NLPConfig struct {
-	Enabled            bool   `mapstructure:"enabled"`
-	Tokenizer          string `mapstructure:"tokenizer"`
-	MaxTokens          int    `mapstructure:"max_tokens"`
-	IntentRecognition  bool   `mapstructure:"intent_recognition"`
-	SemanticSearch     bool   `mapstructure:"semantic_search"`
 }
 
 // FuzzyConfig holds fuzzy matching settings
@@ -87,21 +44,21 @@ type FuzzyConfig struct {
 
 // UIConfig holds UI settings
 type UIConfig struct {
-	Theme             string            `mapstructure:"theme"`
-	ShowConfidence    bool              `mapstructure:"show_confidence"`
-	ShowExplanations  bool              `mapstructure:"show_explanations"`
-	SyntaxHighlighting bool             `mapstructure:"syntax_highlighting"`
-	Pagination        int               `mapstructure:"pagination"`
-	Colors            map[string]string `mapstructure:"colors"`
+	Theme              string            `mapstructure:"theme"`
+	ShowConfidence     bool              `mapstructure:"show_confidence"`
+	ShowExplanations   bool              `mapstructure:"show_explanations"`
+	SyntaxHighlighting bool              `mapstructure:"syntax_highlighting"`
+	Pagination         int               `mapstructure:"pagination"`
+	Colors             map[string]string `mapstructure:"colors"`
 }
 
 // DatabaseConfig holds database settings
 type DatabaseConfig struct {
-	Type           string `mapstructure:"type"`
-	Path           string `mapstructure:"path"`
-	MaxSize        int    `mapstructure:"max_size"`
-	BackupEnabled  bool   `mapstructure:"backup_enabled"`
-	BackupInterval int    `mapstructure:"backup_interval"`
+	Type          string `mapstructure:"type"`
+	Path          string `mapstructure:"path"`
+	MaxSize       int    `mapstructure:"max_size"`
+	BackupEnabled bool   `mapstructure:"backup_enabled"`
+	BackupInterval int   `mapstructure:"backup_interval"`
 }
 
 // HistoryConfig holds history settings
@@ -115,11 +72,11 @@ type HistoryConfig struct {
 
 // ContextConfig holds context analysis settings
 type ContextConfig struct {
-	Enabled            bool `mapstructure:"enabled"`
-	GitIntegration     bool `mapstructure:"git_integration"`
-	ProjectDetection   bool `mapstructure:"project_detection"`
-	EnvironmentVars    bool `mapstructure:"environment_vars"`
-	DirectoryAnalysis  bool `mapstructure:"directory_analysis"`
+	Enabled           bool `mapstructure:"enabled"`
+	GitIntegration    bool `mapstructure:"git_integration"`
+	ProjectDetection  bool `mapstructure:"project_detection"`
+	EnvironmentVars   bool `mapstructure:"environment_vars"`
+	DirectoryAnalysis bool `mapstructure:"directory_analysis"`
 }
 
 // ShellConfig holds shell integration settings
@@ -147,13 +104,13 @@ type LoggingConfig struct {
 
 // TLDRConfig holds TLDR pages settings
 type TLDRConfig struct {
-	Enabled         bool   `mapstructure:"enabled"`
-	AutoSync        bool   `mapstructure:"auto_sync"`
-	AutoSyncInterval int   `mapstructure:"auto_sync_interval"` // days
-	OfflineMode     bool   `mapstructure:"offline_mode"`
-	AutoDetectOnline bool  `mapstructure:"auto_detect_online"`
-	MaxCacheAge     int    `mapstructure:"max_cache_age"`      // days
-	DefaultPlatform string `mapstructure:"default_platform"`
+	Enabled          bool   `mapstructure:"enabled"`
+	AutoSync         bool   `mapstructure:"auto_sync"`
+	AutoSyncInterval int    `mapstructure:"auto_sync_interval"` // days
+	OfflineMode      bool   `mapstructure:"offline_mode"`
+	AutoDetectOnline bool   `mapstructure:"auto_detect_online"`
+	MaxCacheAge      int    `mapstructure:"max_cache_age"`      // days
+	DefaultPlatform  string `mapstructure:"default_platform"`
 }
 
 var (
@@ -242,8 +199,6 @@ func Save() error {
 
 	// Update viper with current config
 	viper.Set("app", globalConfig.App)
-	viper.Set("ai", globalConfig.AI)
-	viper.Set("nlp", globalConfig.NLP)
 	viper.Set("fuzzy", globalConfig.Fuzzy)
 	viper.Set("ui", globalConfig.UI)
 	viper.Set("database", globalConfig.Database)
@@ -267,18 +222,6 @@ func setDefaults() {
 	viper.SetDefault("app.name", "wut")
 	viper.SetDefault("app.version", "1.0.0")
 	viper.SetDefault("app.debug", false)
-
-	viper.SetDefault("ai.enabled", true)
-	viper.SetDefault("ai.model.type", "tiny_neural_network")
-	viper.SetDefault("ai.model.embedding_dimensions", 64)
-	viper.SetDefault("ai.model.hidden_layers", 2)
-	viper.SetDefault("ai.model.hidden_units", 64)
-	viper.SetDefault("ai.model.quantized", true)
-	viper.SetDefault("ai.training.epochs", 100)
-	viper.SetDefault("ai.training.learning_rate", 0.01)
-	viper.SetDefault("ai.training.batch_size", 32)
-	viper.SetDefault("ai.inference.max_suggestions", 5)
-	viper.SetDefault("ai.inference.confidence_threshold", 0.7)
 
 	viper.SetDefault("fuzzy.enabled", true)
 	viper.SetDefault("fuzzy.case_sensitive", false)
@@ -308,35 +251,13 @@ func setDefaults() {
 
 // createDefaultConfig creates a default configuration file
 func createDefaultConfig(path string) error {
-	defaultConfig := `# WUT - AI-Powered Command Helper
+	defaultConfig := `# WUT - Command Helper
 # Default Configuration File
 
 app:
   name: "wut"
   version: "1.0.0"
   debug: false
-
-ai:
-  enabled: true
-  model:
-    type: "tiny_neural_network"
-    version: "1.0.0"
-    path: "~/.wut/models"
-    embedding_dimensions: 64
-    hidden_layers: 2
-    hidden_units: 64
-    quantized: true
-  training:
-    epochs: 100
-    learning_rate: 0.01
-    batch_size: 32
-    auto_train: true
-    min_history_entries: 50
-  inference:
-    max_suggestions: 5
-    confidence_threshold: 0.7
-    cache_enabled: true
-    cache_size: 1000
 
 fuzzy:
   enabled: true
@@ -398,6 +319,7 @@ logging:
   max_size: 10
   max_backups: 5
   max_age: 30
+
 `
 
 	return os.WriteFile(path, []byte(defaultConfig), 0644)
@@ -410,11 +332,6 @@ func expandPaths(cfg *Config) {
 	// Expand database path
 	if cfg.Database.Path != "" {
 		cfg.Database.Path = expandPath(cfg.Database.Path, homeDir)
-	}
-
-	// Expand model path
-	if cfg.AI.Model.Path != "" {
-		cfg.AI.Model.Path = expandPath(cfg.AI.Model.Path, homeDir)
 	}
 
 	// Expand log path
@@ -462,7 +379,6 @@ func EnsureDirs() error {
 	dirs := []string{
 		dataDir,
 		filepath.Join(dataDir, "data"),
-		filepath.Join(dataDir, "models"),
 		filepath.Join(dataDir, "logs"),
 	}
 
@@ -473,4 +389,142 @@ func EnsureDirs() error {
 	}
 
 	return nil
+}
+
+// GetConfigPath returns the current configuration file path
+func GetConfigPath() string {
+	if configPath != "" {
+		return configPath
+	}
+	return getDefaultConfigPath()
+}
+
+// Reset resets configuration to defaults
+func Reset() error {
+	path := GetConfigPath()
+	
+	// Remove existing config
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to remove existing config: %w", err)
+	}
+	
+	// Reset viper
+	viper.Reset()
+	
+	// Recreate default config
+	setDefaults()
+	
+	// Create new config file
+	if err := createDefaultConfig(path); err != nil {
+		return fmt.Errorf("failed to create default config: %w", err)
+	}
+	
+	// Reload config
+	cfg, err := Load(path)
+	if err != nil {
+		return fmt.Errorf("failed to reload config: %w", err)
+	}
+	
+	globalConfig = cfg
+	return nil
+}
+
+// Edit opens the config file in the default editor
+func Edit() error {
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		// Try common editors
+		editors := []string{"nano", "vim", "vi", "code", "notepad", "notepad++"}
+		for _, ed := range editors {
+			if _, err := exec.LookPath(ed); err == nil {
+				editor = ed
+				break
+			}
+		}
+	}
+	
+	if editor == "" {
+		return fmt.Errorf("no editor found. Set EDITOR environment variable")
+	}
+	
+	path := GetConfigPath()
+	
+	// Ensure file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		if err := createDefaultConfig(path); err != nil {
+			return fmt.Errorf("failed to create config file: %w", err)
+		}
+	}
+	
+	cmd := exec.Command(editor, path)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	return cmd.Run()
+}
+
+// Import imports configuration from a file
+func Import(path string) error {
+	// Read source file
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read import file: %w", err)
+	}
+	
+	// Validate YAML
+	var importedCfg Config
+	if err := yaml.Unmarshal(data, &importedCfg); err != nil {
+		return fmt.Errorf("invalid config file: %w", err)
+	}
+	
+	// Backup current config
+	currentPath := GetConfigPath()
+	backupPath := currentPath + ".backup." + time.Now().Format("20060102-150405")
+	if _, err := os.Stat(currentPath); err == nil {
+		if err := copyFile(currentPath, backupPath); err != nil {
+			return fmt.Errorf("failed to create backup: %w", err)
+		}
+	}
+	
+	// Copy new config
+	if err := copyFile(path, currentPath); err != nil {
+		// Restore backup on failure
+		copyFile(backupPath, currentPath)
+		return fmt.Errorf("failed to import config: %w", err)
+	}
+	
+	// Reload
+	cfg, err := Load(currentPath)
+	if err != nil {
+		// Restore backup on failure
+		copyFile(backupPath, currentPath)
+		return fmt.Errorf("failed to load imported config: %w", err)
+	}
+	
+	globalConfig = cfg
+	return nil
+}
+
+// Export exports configuration to a file
+func Export(path string) error {
+	return copyFile(GetConfigPath(), path)
+}
+
+// copyFile copies a file from src to dst
+func copyFile(src, dst string) error {
+	source, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	
+	destination, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer destination.Close()
+	
+	_, err = io.Copy(destination, source)
+	return err
 }

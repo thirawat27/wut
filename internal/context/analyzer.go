@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -333,13 +334,15 @@ func (a *Analyzer) getProjectCommands() []string {
 
 func findGitDir(startPath string) string {
 	current := startPath
-	for current != "/" && current != "." {
+	// Check until we reach root or can't go further
+	for {
 		gitPath := filepath.Join(current, ".git")
 		if info, err := os.Stat(gitPath); err == nil && info.IsDir() {
 			return gitPath
 		}
 		parent := filepath.Dir(current)
-		if parent == current {
+		// Stop if we've reached root (parent == current) or empty path
+		if parent == current || parent == "" {
 			break
 		}
 		current = parent
@@ -348,15 +351,34 @@ func findGitDir(startPath string) string {
 }
 
 func detectOS() string {
-	return strings.ToLower(os.Getenv("GOOS"))
+	// Use runtime.GOOS for reliable OS detection at compile time
+	return strings.ToLower(runtime.GOOS)
 }
 
 func detectShell() string {
 	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = os.Getenv("COMSPEC") // Windows
+	if shell != "" {
+		return filepath.Base(shell)
 	}
-	return filepath.Base(shell)
+	
+	// Windows detection
+	if runtime.GOOS == "windows" {
+		// Check for PowerShell first (more common now)
+		if os.Getenv("PSModulePath") != "" {
+			// Could be PowerShell or PowerShell Core
+			if os.Getenv("PSVersionTable") != "" {
+				return "pwsh" // PowerShell Core
+			}
+			return "powershell"
+		}
+		// Fall back to COMSPEC (cmd.exe)
+		if comspec := os.Getenv("COMSPEC"); comspec != "" {
+			return filepath.Base(comspec)
+		}
+		return "cmd"
+	}
+	
+	return "sh" // Default fallback
 }
 
 func matchPattern(files []string, pattern string) bool {

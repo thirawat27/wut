@@ -1,4 +1,4 @@
-# WUT - AI-Powered Command Helper
+# WUT - Command Helper
 
 [![CI](https://github.com/thirawat27/wut/actions/workflows/ci.yml/badge.svg)](https://github.com/thirawat27/wut/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/thirawat27/wut)](https://github.com/thirawat27/wut/releases)
@@ -8,9 +8,18 @@
 
 WUT is a production-ready, cross-platform, intelligent command line assistant that helps you find the right commands, correct typos, and learn new shell commands through natural language queries.
 
-## 🌍 Cross-Platform Support
+## ✨ Features
 
-WUT works on **all major platforms** and **all popular terminals**:
+- 🚀 **Smart Suggestions** - Get command suggestions with TUI interface
+- 🔧 **Command Fixing** - Auto-correct typos in your commands
+- 📚 **TLDR Integration** - Access TLDR pages for quick command help
+- 📜 **History Tracking** - Track and analyze your command usage
+- 🐚 **Shell Integration** - Key bindings for quick access (Ctrl+Space)
+- ⚙️ **Flexible Config** - Easy configuration management with dot notation
+- 🎨 **Adaptive UI** - Auto-detect terminal capabilities
+- 🔒 **Privacy First** - All processing happens locally
+
+## 🌍 Cross-Platform Support
 
 ### Operating Systems
 - **Windows**: Windows 10/11, Windows Server (amd64, arm64, 386)
@@ -19,102 +28,94 @@ WUT works on **all major platforms** and **all popular terminals**:
 - **BSD**: FreeBSD, OpenBSD, NetBSD (amd64, arm64)
 
 ### Shells
-- **Bash** (Linux, macOS, WSL)
-- **Zsh** (macOS default, popular on Linux)
-- **Fish** (Modern, user-friendly)
-- **PowerShell** (Windows, cross-platform)
-- **Nushell** (Modern structured shell)
-- **Elvish** (Expressive programming language shell)
-- **Xonsh** (Python-powered shell)
-- **Tcsh/Csh** (BSD, legacy systems)
-- **Ksh** (AIX, commercial Unix)
+- Bash, Zsh, Fish, PowerShell, Nushell, Elvish, Xonsh, Tcsh/Csh, Ksh
 
-### Terminals
-- ✅ Windows Terminal (Recommended for Windows)
-- ✅ iTerm2 (Recommended for macOS)
-- ✅ Alacritty, WezTerm, Kitty (GPU-accelerated)
-- ✅ GNOME Terminal, Konsole, Terminal.app
-- ✅ Tmux, Screen (Terminal multiplexers)
-- ✅ VS Code Terminal, JetBrains Terminal
-- ✅ Any terminal with basic VT100 support
+## 🚀 Quick Start
 
-## 🚀 Quick Install
+### Installation
 
-### One-Line Install (Recommended)
+**One-Line Install (Recommended):**
 
-**Linux/macOS:**
 ```bash
+# Linux/macOS
 curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
-```
 
-**Windows (PowerShell):**
-```powershell
+# Windows (PowerShell):
 irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 ```
 
-### Package Managers
+**Package Managers:**
 
-**Chocolatey (Windows):** ⭐ Recommended
-```powershell
+```bash
+# Chocolatey (Windows)
 choco install wut
-```
 
-**Snap (Linux):**
-```bash
-sudo snap install wut
-```
-
-**Go Install:**
-```bash
+# Go Install
 go install github.com/thirawat27/wut@latest
-```
 
-**Docker:**
-```bash
+# Docker
 docker pull ghcr.io/thirawat27/wut:latest
 ```
 
-**Nix (NixOS/Linux/macOS):**
+### First-Time Setup
+
+After installation, run the initialization wizard:
+
 ```bash
-nix profile install github:thirawat27/wut
+wut init              # Interactive setup
+wut init --quick      # Quick setup with defaults
 ```
 
-**AUR (Arch Linux):**
-```bash
-yay -S wut
-# or
-paru -S wut
-```
-
-### Pre-built Binaries
-
-Download from [Releases](https://github.com/thirawat27/wut/releases) for your platform:
-
-| Platform | Architectures |
-|----------|--------------|
-| Windows | amd64, arm64, 386 |
-| macOS | amd64, arm64 (Apple Silicon) |
-| Linux | amd64, arm64, arm, 386, riscv64 |
-| FreeBSD | amd64, arm64 |
-| OpenBSD | amd64 |
-| NetBSD | amd64 |
+This will:
+- Create configuration directories
+- Set up your preferred theme
+- Detect and configure shell integration
+- Optionally download TLDR pages
 
 ## 📖 Usage
+
+### Command Shortcuts
+
+WUT provides convenient shortcuts for common commands:
+
+| Shortcut | Command | Description |
+|----------|---------|-------------|
+| `wut s` | `wut suggest` | Get command suggestions |
+| `wut h` | `wut history` | View command history |
+| `wut x` | `wut explain` | Explain a command |
+| `wut a` | `wut alias` | Manage aliases |
+| `wut c` | `wut config` | Manage configuration |
+| `wut t` | `wut tldr` | TLDR pages management |
+| `wut f` | `wut fix` | Fix command typos |
+| `wut ?` | `wut smart` | Smart command suggestions |
 
 ### Get Command Suggestions
 
 ```bash
-# Basic suggestion
-wut suggest "git push"
-
-# Interactive mode (TUI)
+# Interactive TUI mode
 wut suggest
+wut s
 
-# Limit results
-wut suggest "docker" --limit 3
+# Get specific command help
+wut suggest git
+wut s docker
 
 # Quiet mode (pipe-friendly)
-wut suggest "git psuh" --quiet
+wut suggest git --quiet
+
+# Raw text output
+wut suggest git --raw
+```
+
+### Fix Typos
+
+```bash
+# Correct typos in commands
+wut fix "gti status"
+wut f "doker ps"
+
+# List common typos
+wut fix --list
 ```
 
 ### View Command History
@@ -122,16 +123,16 @@ wut suggest "git psuh" --quiet
 ```bash
 # View recent commands
 wut history
+wut h
 
 # Show statistics
-wut history --stats
+wut h --stats
 
 # Search history
-wut history --search "docker"
+wut h --search "docker"
 
-# Export/Import
-wut history --export backup.json
-wut history --import backup.json
+# Import from shell history
+wut h --import-shell
 ```
 
 ### Explain Commands
@@ -139,31 +140,102 @@ wut history --import backup.json
 ```bash
 # Explain a command
 wut explain "git rebase -i"
-
-# Detailed explanation
-wut explain "kubectl apply -f deployment.yaml" --verbose
+wut x "kubectl apply -f deployment.yaml"
 
 # Check for dangerous commands
-wut explain "rm -rf /"
+wut x "rm -rf /"
 ```
 
-### Train AI Model
+### Smart Suggestions
 
 ```bash
-# Quick training
-wut train
+# Get context-aware suggestions
+wut smart
+wut ?
 
-# Custom training
-wut train --epochs 200 --learning-rate 0.005
-
-# Force training with insufficient data
-wut train --force
+# Query-based suggestions
+wut ? "how to find large files"
+wut ? "compress folder to tar.gz"
 ```
 
-### Shell Integration
+### Manage Aliases
 
 ```bash
-# Install for current shell
+# List aliases
+wut alias
+wut a
+
+# Generate smart aliases for current project
+wut a --generate
+
+# Add custom alias
+wut a --add --name gs --command "git status"
+```
+
+## ⚙️ Configuration
+
+WUT provides a powerful configuration system with dot notation support.
+
+### View Configuration
+
+```bash
+wut config              # Show all config
+wut c                   # Shortcut
+```
+
+### Get/Set Configuration
+
+```bash
+# Get a value
+wut config --get ui.theme
+wut c -g ui.theme
+
+# Set a value
+wut config --set ui.theme dark
+wut c -s ui.theme --value dark
+
+# Enable/disable features
+wut c -s fuzzy.enabled --value true
+wut c -s history.enabled --value false
+```
+
+### Available Config Keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `ui.theme` | string | Theme: auto, dark, light |
+| `ui.show_confidence` | bool | Show confidence scores |
+| `fuzzy.enabled` | bool | Enable fuzzy matching |
+| `fuzzy.threshold` | float | Fuzzy match threshold (0-1) |
+| `history.enabled` | bool | Track command history |
+| `history.max_entries` | int | Max history entries |
+| `logging.level` | string | Log level: debug, info, warn, error |
+| `tldr.auto_sync` | bool | Auto-sync TLDR pages |
+| `context.enabled` | bool | Enable context analysis |
+
+### Edit Configuration File
+
+```bash
+# Open in default editor
+wut config --edit
+
+# Import/Export
+wut config --import backup.yaml
+wut config --export backup.yaml
+```
+
+### Configuration File Locations
+
+- **Linux/macOS**: `~/.config/wut/config.yaml`
+- **Windows**: `%USERPROFILE%\.config\wut\config.yaml`
+- **XDG**: `$XDG_CONFIG_HOME/wut/config.yaml`
+
+## 🐚 Shell Integration
+
+### Install Shell Integration
+
+```bash
+# Auto-detect and install
 wut install
 
 # Install for specific shell
@@ -171,113 +243,56 @@ wut install --shell zsh
 
 # Install for all detected shells
 wut install --all
+```
 
-# Uninstall
+### Key Bindings
+
+After installation, these key bindings are available:
+
+| Key | Action |
+|-----|--------|
+| `Ctrl+Space` | Open WUT TUI |
+| `Ctrl+G` | Open WUT with current command line |
+
+### Uninstall
+
+```bash
 wut install --uninstall
 ```
 
-## ⚙️ Terminal Adaptation
+## 📚 TLDR Pages
 
-WUT automatically detects your terminal capabilities and adapts:
+### Sync TLDR Pages
 
-### Automatic Detection
-- ✅ Color support (basic, 256, true color)
-- ✅ Unicode and emoji support
-- ✅ Terminal type and features
-- ✅ Screen size and capabilities
+```bash
+# Download popular commands
+wut tldr sync
+wut t sync
 
-### Adaptive Output
+# Download specific commands
+wut tldr sync git docker npm
 
-**Basic Terminals** (dumb, limited):
-- ASCII-only output
-- No colors or minimal colors
-- Simple text layout
-
-**Modern Terminals** (Windows Terminal, iTerm2, Alacritty):
-- Full emoji support
-- True color (24-bit)
-- Beautiful TUI with Bubble Tea
-- Nerd Font icons (optional)
-
-**Configure manually if needed:**
-```yaml
-# ~/.config/wut/config.yaml
-ui:
-  theme: "auto"        # auto, none, basic, 256, truecolor
-  force_unicode: false
-  force_emoji: false
-  use_nerd_fonts: false
+# Download all commands
+wut tldr sync --all
 ```
 
-## 🔧 Configuration
+### Check Status
 
-Configuration file locations:
-- **Linux/macOS**: `~/.config/wut/config.yaml`
-- **Windows**: `%USERPROFILE%\.config\wut\config.yaml`
-- **XDG**: `$XDG_CONFIG_HOME/wut/config.yaml`
-
-### Example Configuration
-
-```yaml
-app:
-  name: "wut"
-  version: "1.0.0"
-  debug: false
-
-ai:
-  enabled: true
-  model:
-    type: "tiny_neural_network"
-    embedding_dimensions: 64
-    hidden_layers: 2
-    hidden_units: 64
-    quantized: true
-  training:
-    epochs: 100
-    learning_rate: 0.01
-    batch_size: 32
-  inference:
-    max_suggestions: 5
-    confidence_threshold: 0.7
-
-ui:
-  theme: "auto"              # auto, none, basic, 256, truecolor
-  show_confidence: true
-  show_explanations: true
-  syntax_highlighting: true
-  # Terminal adaptation
-  force_unicode: false       # Force Unicode even if not detected
-  force_emoji: false         # Force emoji even if not detected
-  use_nerd_fonts: auto       # auto, true, false
-
-# Shell-specific settings
-shell:
-  bash:
-    key_binding: "ctrl+space"
-  zsh:
-    key_binding: "ctrl+space"
-  fish:
-    key_binding: "ctrl+space"
-  powershell:
-    key_binding: "ctrl+space"
+```bash
+wut tldr status
 ```
 
 ## 🐳 Docker
 
-### Run with Docker
 ```bash
+# Run with Docker
 docker run --rm -it ghcr.io/thirawat27/wut:latest suggest
-```
 
-### Docker Compose
-```yaml
-version: '3.8'
-services:
-  wut:
-    image: ghcr.io/thirawat27/wut:latest
-    volumes:
-      - ~/.wut:/home/wut/.wut
-      - ~/.config/wut:/home/wut/.config/wut
+# With persistent config
+docker run --rm -it \
+  -v ~/.wut:/home/wut/.wut \
+  -v ~/.config/wut:/home/wut/.config/wut \
+  ghcr.io/thirawat27/wut:latest
 ```
 
 ## 🏗️ Development
@@ -288,6 +303,7 @@ services:
 - Git
 
 ### Build from Source
+
 ```bash
 # Clone repository
 git clone https://github.com/thirawat27/wut
@@ -298,26 +314,13 @@ make build
 
 # Build for all platforms
 make build-all
-
-# Build for specific platform
-make build-windows
-make build-linux
-make build-macos
 ```
 
 ### Run Tests
+
 ```bash
 make test
 make test-coverage
-```
-
-### Development Mode
-```bash
-# With hot reload (requires air)
-make dev
-
-# Or manually
-go run .
 ```
 
 ## 📊 Performance
@@ -326,46 +329,35 @@ go run .
 - **Suggestion Response**: < 20ms
 - **Memory Usage**: < 20MB
 - **Binary Size**: ~10-15MB
-- **Model Size**: ~2-3MB
 
 ## 🔒 Security & Privacy
 
-- All AI processing runs **locally**
+- All processing runs **locally**
 - No data sent to external servers
 - Command history stored locally
 - Optional encryption for sensitive data
-- Configurable anonymization
 
 ## 🛠️ Troubleshooting
 
 ### Terminal Not Detected Correctly
+
 ```bash
-# Force specific terminal capabilities
 export WUT_THEME=truecolor
 export WUT_FORCE_UNICODE=1
 export WUT_FORCE_EMOJI=1
 ```
 
-### Shell Integration Not Working
+### Reset Configuration
+
 ```bash
-# Manually add to your shell config
-# Bash (~/.bashrc):
-eval "$(wut completion bash)"
-
-# Zsh (~/.zshrc):
-eval "$(wut completion zsh)"
-
-# Fish (~/.config/fish/config.fish):
-wut completion fish | source
+wut config --reset
 ```
 
 ### Windows-Specific Issues
+
 ```powershell
 # Execution policy
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-
-# Windows Defender may flag - add exclusion
-# Or use: Windows Security > Virus & threat protection > Exclusions
 ```
 
 ## 🤝 Contributing
@@ -389,10 +381,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🙏 Acknowledgments
 
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) - TUI framework
-- [Charmbracelet Log](https://github.com/charmbracelet/log) - Structured logging
 - [Cobra](https://github.com/spf13/cobra) - CLI framework
 - [Viper](https://github.com/spf13/viper) - Configuration management
-- [BBolt](https://github.com/etcd-io/bbolt) - Embedded database
+- [TLDR Pages](https://tldr.sh/) - Command line help database
 
 ## 📞 Support
 

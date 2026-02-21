@@ -640,7 +640,6 @@ func (d *suggestionDelegate) renderUnicode(w io.Writer, i suggestionItem, select
 	// Source icon mapping
 	sourceIcons := map[search.Source]string{
 		search.SourceHistory: "📜",
-		search.SourceAI:      "🤖",
 		search.SourceBuiltin: "📦",
 		search.SourceAlias:   "🏷️",
 		search.SourcePath:    "🛤️",
