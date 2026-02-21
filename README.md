@@ -7,7 +7,7 @@
 *Stop memorizing commands. Start getting things done.*
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org)
+[![Go Version](https://img.shields.io/badge/go-%3E%3D1.26-blue)](https://golang.org)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20BSD-blue)]
 [![Release](https://img.shields.io/github/v/release/thirawat27/wut)](https://github.com/thirawat27/wut/releases)
 
@@ -34,10 +34,10 @@
 - **Smart Command Suggestions**: Context-aware command recommendations based on your project type and history
 - **Typo Correction**: Automatically detect and fix common command typos
 - **Command Explanations**: Get detailed breakdowns of what commands do and their potential risks
-- **TLDR Integration**: Quick access to practical command examples from the TLDR pages database
+- **Command Database**: Quick access to practical command examples from the command database
 - **History Tracking**: Learn from your command usage patterns
 - **Shell Integration**: Quick access via keyboard shortcuts (Ctrl+Space)
-- **Cross-Platform**: Works on Windows, macOS, Linux, and BSD systems
+- **Cross-Platform**: Works on Windows, macOS, Linux, and BSD systems (FreeBSD, OpenBSD, NetBSD)
 - **Privacy-Focused**: All processing happens locally on your machine
 
 ## Installation
@@ -46,8 +46,15 @@
 
 #### Option 1: GUI Installer (Recommended for Beginners)
 
-1. Download `wut-setup.exe` from the [latest release](https://github.com/thirawat27/wut/releases/latest)
-2. Double-click the installer and follow the setup wizard
+> Note: GUI installer requires building from source with Inno Setup.
+
+1. Clone the repository and build the installer:
+   ```powershell
+   git clone https://github.com/thirawat27/wut.git
+   cd wut
+   # Build installer using scripts/wut-installer.iss with Inno Setup
+   ```
+2. Run the generated `wut-setup.exe` and follow the setup wizard
 3. Open a new PowerShell or Command Prompt window
 4. Verify installation:
    ```powershell
@@ -64,24 +71,12 @@ irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | 
 
 This will automatically download, install, and configure WUT for your system.
 
-#### Option 3: WinGet Package Manager
-
-```powershell
-winget install thirawat27.wut
-```
-
 ### macOS
 
-#### Option 1: Installation Script (Recommended)
+#### Installation Script (Recommended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
-```
-
-#### Option 2: Homebrew (Coming Soon)
-
-```bash
-brew install wut
 ```
 
 ### Linux
@@ -92,37 +87,38 @@ brew install wut
 curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
 ```
 
+### BSD Systems (FreeBSD, OpenBSD, NetBSD)
+
+#### Installation Script
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
+```
+
 The script will:
 - Detect your system architecture
 - Download the appropriate binary
-- Install it to `/usr/local/bin`
+- Install it to `/usr/local/bin` (or `~/.local/bin` for non-root users)
 - Set up shell integration
 - Initialize configuration
 
-#### Manual Installation
-
-1. Download the binary for your architecture from [releases](https://github.com/thirawat27/wut/releases/latest)
-2. Extract and move to your PATH:
-   ```bash
-   tar -xzf wut-linux-amd64.tar.gz
-   sudo mv wut /usr/local/bin/
-   sudo chmod +x /usr/local/bin/wut
-   ```
+Supported platforms: Linux, macOS, FreeBSD, OpenBSD, NetBSD
 
 ### Installation Options
 
 All installation scripts support these options:
 
-| Option | Description | Example |
-|--------|-------------|---------|
-| `--version` / `-Version` | Install specific version | `--version v1.0.0` |
-| `--no-init` / `-NoInit` | Skip automatic initialization | `--no-init` |
-| `--no-shell` / `-NoShell` | Skip shell integration | `--no-shell` |
-| `--force` / `-Force` | Overwrite existing installation | `--force` |
+| Option (Linux/macOS) | Option (Windows) | Description | Example |
+|---------------------|------------------|-------------|---------|
+| `--version` | `-Version` | Install specific version | `--version v1.0.0` |
+| `--no-init` | `-NoInit` | Skip automatic initialization | `--no-init` |
+| `--no-shell` | `-NoShell` | Skip shell integration | `--no-shell` |
+| `--force` | `-Force` | Overwrite existing installation | `--force` |
+| `--uninstall` | `-Uninstall` | Uninstall WUT | `--uninstall` |
 
 Example with options:
 ```bash
-# Linux/macOS
+# Linux/macOS/BSD
 curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --version v1.0.0 --no-init
 
 # Windows
@@ -132,23 +128,22 @@ curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install
 ### Docker
 
 ```bash
-# Pull the image
-docker pull ghcr.io/thirawat27/wut:latest
+# Build the image
+docker build -t wut:latest .
 
 # Run WUT
-docker run --rm -it ghcr.io/thirawat27/wut:latest suggest
+docker run --rm -it wut:latest suggest
 
 # With persistent configuration
 docker run --rm -it \
-  -v ~/.wut:/home/wut/.wut \
   -v ~/.config/wut:/home/wut/.config/wut \
-  ghcr.io/thirawat27/wut:latest
+  wut:latest
 ```
 
 ### Build from Source
 
 Requirements:
-- Go 1.21 or higher
+- Go 1.26 or higher
 - Git
 - Make (optional)
 
@@ -179,13 +174,24 @@ wut init
 
 # Quick setup with defaults
 wut init --quick
+
+# Setup options
+wut init --skip-tldr      # Skip TLDR pages download
+wut init --skip-shell     # Skip shell integration
+wut init --no-tui         # Use simple text interface (no TUI)
+
+# Specify shell type
+wut init --shell zsh
+wut init --shell bash
+wut init --shell fish
+wut init --shell powershell
 ```
 
 The initialization process will:
 1. Create configuration directories
 2. Set up your preferred theme
 3. Detect and configure shell integration
-4. Optionally download TLDR pages for offline use
+4. Optionally download command database for offline use
 
 ### Shell Integration
 
@@ -247,13 +253,13 @@ WUT provides convenient shortcuts for faster typing:
 | `wut x` | `wut explain` | Explain a command |
 | `wut a` | `wut alias` | Manage aliases |
 | `wut c` | `wut config` | Manage configuration |
-| `wut t` | `wut tldr` | TLDR pages management |
+| `wut t` | `wut db` | Database management |
 | `wut f` | `wut fix` | Fix command typos |
 | `wut ?` | `wut smart` | Smart suggestions |
 
 ### 1. Suggest Command
 
-Get command suggestions and examples from the TLDR pages database.
+Get command suggestions and examples from the command database.
 
 ```bash
 # Interactive mode with live search
@@ -275,7 +281,12 @@ wut suggest docker --offline
 
 # Limit number of examples shown
 wut suggest git --limit 5
+
+# Execute selected command after selection
+wut suggest git --exec
 ```
+
+> **Note**: Command execution in `suggest` happens via the TUI interface itself (press Enter on a command). The `--exec` flag is defined but not yet wired to the non-interactive flow.
 
 **Interactive Mode Features:**
 - Type to search through thousands of commands
@@ -302,6 +313,8 @@ wut fix --list
 wut fix "gti push" --copy
 ```
 
+> **Note**: The `--copy` flag is defined but clipboard copying is not yet fully implemented in the current version.
+
 **Common Typos Detected:**
 - `gti` → `git`
 - `doker` → `docker`
@@ -325,6 +338,8 @@ wut explain "docker build -t myapp ." --verbose
 # Check specifically for dangerous commands
 wut explain "rm -rf /" --dangerous
 ```
+
+> **Note**: The `--verbose` flag is defined but additional detail output is not yet differentiated from the standard output in the current version.
 
 **Explanation Includes:**
 - Command summary and description
@@ -357,6 +372,8 @@ wut smart --exec
 wut smart --correct=false
 ```
 
+> **Note**: The `--exec` flag is defined but not yet fully implemented in the current version.
+
 **Context Detection:**
 WUT automatically detects your project type and provides relevant suggestions:
 - **Go projects**: `go mod tidy`, `go test ./...`, `go build`
@@ -383,6 +400,12 @@ wut h --search "git commit"
 # Import commands from shell history
 wut h --import-shell
 
+# Import with custom worker count for faster processing
+wut h --import-shell --workers 4
+
+# Import history from file
+wut h --import history.json
+
 # Clear history
 wut h --clear
 
@@ -404,14 +427,13 @@ wut a --add --name gs --command "git status"
 wut a --add --name dc --command "docker-compose"
 
 # Remove an alias
-wut a --remove gs
+# Note: Remove alias is not yet implemented. Edit config file directly.
 
 # Generate smart aliases based on your project
 wut a --generate
 
 # Export aliases to shell format
-wut a --export bash > ~/.bash_aliases
-wut a --export zsh > ~/.zsh_aliases
+# Note: Export aliases to shell format is not yet implemented
 ```
 
 ### 7. Config Command
@@ -428,7 +450,7 @@ wut config --get ui.theme
 wut c -g fuzzy.threshold
 
 # Set a configuration value
-wut config --set ui.theme dark
+wut config --set ui.theme --value dark
 wut c -s history.enabled --value true
 
 # Edit configuration file in default editor
@@ -444,29 +466,33 @@ wut config --export backup.yaml
 wut config --import backup.yaml
 ```
 
-### 8. TLDR Command
+### 8. Database Command
 
-Manage the TLDR pages database for offline use.
+Manage the command database for offline use.
 
 ```bash
 # Download popular commands
-wut tldr sync
+wut db sync
 wut t sync
 
 # Download specific commands
-wut tldr sync git docker npm kubectl
+wut db sync git docker npm kubectl
 
-# Download all available commands
-wut tldr sync --all
+# Download all available commands (may take a while)
+wut db sync --all
+
+# Force update existing pages
+wut db sync --force
+wut db sync git --force
 
 # Check database status
-wut tldr status
+wut db status
 
 # Update existing database
-wut tldr update
+wut db update
 
 # Clear local database
-wut tldr clear
+wut db clear
 ```
 
 ### 9. Install Command
@@ -489,8 +515,7 @@ wut install --all
 # Uninstall shell integration
 wut install --uninstall
 
-# Show installation status
-wut install --status
+# Note: --status flag is not implemented
 ```
 
 ## Configuration
@@ -506,17 +531,48 @@ WUT stores its configuration in:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
+| `app.name` | string | `wut` | Application name |
+| `app.debug` | bool | `false` | Enable debug mode |
 | `ui.theme` | string | `auto` | Theme: `auto`, `dark`, `light` |
 | `ui.show_confidence` | bool | `true` | Show confidence scores |
 | `ui.show_explanations` | bool | `true` | Show detailed explanations |
+| `ui.syntax_highlighting` | bool | `true` | Enable syntax highlighting |
+| `ui.pagination` | int | `10` | Items per page |
 | `fuzzy.enabled` | bool | `true` | Enable fuzzy matching |
-| `fuzzy.threshold` | float | `0.7` | Fuzzy match threshold (0-1) |
+| `fuzzy.case_sensitive` | bool | `false` | Case-sensitive matching |
+| `fuzzy.max_distance` | int | `3` | Maximum edit distance |
+| `fuzzy.threshold` | float | `0.6` | Fuzzy match threshold (0-1) |
 | `history.enabled` | bool | `true` | Track command history |
-| `history.max_entries` | int | `1000` | Maximum history entries |
-| `logging.level` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `tldr.auto_sync` | bool | `false` | Auto-sync TLDR pages |
-| `tldr.cache_duration` | string | `24h` | Cache duration for TLDR pages |
+| `history.max_entries` | int | `10000` | Maximum history entries |
+| `history.track_frequency` | bool | `true` | Track command frequency |
+| `history.track_context` | bool | `true` | Track command context |
+| `history.track_timing` | bool | `true` | Track command timing |
+| `database.type` | string | `bbolt` | Database type |
+| `database.path` | string | `~/.wut/data` | Database file path |
+| `database.max_size` | int | `100` | Max database size (MB) |
+| `database.backup_enabled` | bool | `true` | Enable backups |
+| `database.backup_interval` | int | `24` | Backup interval (hours) |
+| `tldr.enabled` | bool | `true` | Enable TLDR pages |
+| `tldr.auto_sync` | bool | `true` | Auto-sync TLDR pages |
+| `tldr.auto_sync_interval` | int | `7` | Auto-sync interval (days) |
+| `tldr.offline_mode` | bool | `false` | Force offline mode |
+| `tldr.auto_detect_online` | bool | `true` | Auto-detect online status |
+| `tldr.max_cache_age` | int | `30` | Max cache age (days) |
+| `tldr.default_platform` | string | `common` | Default platform |
 | `context.enabled` | bool | `true` | Enable context analysis |
+| `context.git_integration` | bool | `true` | Enable Git integration |
+| `context.project_detection` | bool | `true` | Auto-detect project types |
+| `context.environment_vars` | bool | `true` | Track environment variables |
+| `context.directory_analysis` | bool | `true` | Analyze directories |
+| `logging.level` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `logging.file` | string | `~/.wut/logs/wut.log` | Log file path |
+| `logging.max_size` | int | `10` | Max log size (MB) |
+| `logging.max_backups` | int | `5` | Max log backups |
+| `logging.max_age` | int | `30` | Max log age (days) |
+| `privacy.local_only` | bool | `true` | Keep data local |
+| `privacy.encrypt_data` | bool | `true` | Encrypt sensitive data |
+| `privacy.anonymize_commands` | bool | `false` | Anonymize commands |
+| `privacy.share_analytics` | bool | `false` | Share analytics |
 
 ### Example Configuration
 
@@ -528,50 +584,77 @@ ui:
   theme: dark
   show_confidence: true
   show_explanations: true
+  syntax_highlighting: true
+  pagination: 10
 
 fuzzy:
   enabled: true
-  threshold: 0.7
+  case_sensitive: false
+  max_distance: 3
+  threshold: 0.6
 
 history:
   enabled: true
-  max_entries: 1000
+  max_entries: 10000
+  track_frequency: true
+  track_context: true
+  track_timing: true
 
 logging:
   level: info
-  file: ~/.config/wut/wut.log
+  file: ~/.wut/logs/wut.log
+  max_size: 10
+  max_backups: 5
+  max_age: 30
 
 tldr:
-  auto_sync: false
-  cache_duration: 24h
+  enabled: true
+  auto_sync: true
+  auto_sync_interval: 7
+  offline_mode: false
+  max_cache_age: 30
+  default_platform: common
 
 context:
   enabled: true
+  git_integration: true
+  project_detection: true
+  environment_vars: true
+  directory_analysis: true
 
 database:
-  path: ~/.config/wut/wut.db
+  type: bbolt
+  path: ~/.wut/data
+  max_size: 100
+  backup_enabled: true
+  backup_interval: 24
+
+privacy:
+  local_only: true
+  encrypt_data: true
+  anonymize_commands: false
+  share_analytics: false
 ```
 
 ### Environment Variables
 
-Override configuration with environment variables:
+Override configuration with environment variables using the `WUT_` prefix and uppercase key names with `_` as separator:
 
 ```bash
 # Set theme
-export WUT_THEME=dark
+export WUT_UI_THEME=dark
 
 # Enable debug mode
-export WUT_DEBUG=true
-
-# Force Unicode support
-export WUT_FORCE_UNICODE=1
-
-# Force emoji support
-export WUT_FORCE_EMOJI=1
+export WUT_APP_DEBUG=true
 
 # Set log level
-export WUT_LOG_LEVEL=debug
+export WUT_LOGGING_LEVEL=debug
+
+# Set fuzzy threshold
+export WUT_FUZZY_THRESHOLD=0.8
 ```
+
+Note: Environment variables use the `WUT_` prefix with uppercase key names. Nested keys use `_` as separator. For example, `ui.theme` becomes `WUT_UI_THEME`.
 
 ## Advanced Usage
 
@@ -583,13 +666,12 @@ WUT can be used in scripts and pipelines:
 # Get command and pipe to execution
 wut suggest git --quiet | head -1 | bash
 
-# Fix typo and execute
-FIXED=$(wut fix "gti status" --quiet)
-eval $FIXED
+# Fix typo and view result
+wut fix "gti status"
 
 # Export history for analysis
 wut history --export history.json
-cat history.json | jq '.commands[] | select(.count > 10)'
+cat history.json | jq '.[] | select(.usage_count > 10)'
 ```
 
 ### Custom Workflows
@@ -597,19 +679,16 @@ cat history.json | jq '.commands[] | select(.count > 10)'
 Create custom workflows by combining WUT commands:
 
 ```bash
-# Create a deployment script
+# Create a helper script
 #!/bin/bash
 echo "Checking project context..."
 wut smart
 
-echo "Running tests..."
-wut ? "run tests" --exec
+echo "Getting test suggestions..."
+wut ? "run tests"
 
-echo "Building..."
-wut ? "build" --exec
-
-echo "Deploying..."
-wut ? "deploy" --exec
+echo "Getting build suggestions..."
+wut ? "build"
 ```
 
 ### Integration with Other Tools
@@ -639,9 +718,12 @@ watch -n 5 'wut smart --limit 3'
    ```powershell
    $env:PATH -split ';' | Select-String 'WUT'
    ```
-3. If not found, add manually:
+3. If not found, add manually (use the path where WUT was installed):
    ```powershell
-   [Environment]::SetEnvironmentVariable("PATH", "$env:PATH;C:\Program Files\WUT", "User")
+   # For non-admin installs (default):
+   [Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$env:LOCALAPPDATA\WUT", "User")
+   # For admin installs:
+   [Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$env:ProgramFiles\WUT", "Machine")
    ```
 
 **Linux/macOS:**
@@ -657,11 +739,11 @@ watch -n 5 'wut smart --limit 3'
 
 #### Windows SmartScreen Warning
 
-When running the installer, Windows may show a protection warning:
+When running the installer or downloaded binary, Windows may show a protection warning:
 1. Click "More info"
 2. Click "Run anyway"
 
-This is a false positive common with new executables. The software is safe.
+This is common with new executables downloaded from the internet. The software is safe to use.
 
 #### Permission Denied (Linux/macOS)
 
@@ -685,18 +767,18 @@ source ~/.bashrc  # Bash
 source ~/.zshrc   # Zsh
 ```
 
-#### TLDR Pages Not Found
+#### Database Not Found
 
 ```bash
-# Download TLDR database
-wut tldr sync
+# Download command database
+wut db sync
 
 # Check status
-wut tldr status
+wut db status
 
 # Force re-download
-wut tldr clear
-wut tldr sync --all
+wut db clear
+wut db sync --all
 ```
 
 #### Configuration Reset
@@ -721,11 +803,11 @@ Enable debug mode for detailed logging:
 wut --debug suggest
 
 # Via environment variable
-export WUT_DEBUG=true
+export WUT_APP_DEBUG=true
 wut suggest
 
 # Via configuration
-wut config --set logging.level debug
+wut config --set logging.level --value debug
 ```
 
 ### Getting Help
@@ -735,21 +817,13 @@ wut config --set logging.level debug
 - **Discussions**: [GitHub Discussions](https://github.com/thirawat27/wut/discussions)
 - **Documentation**: [GitHub Wiki](https://github.com/thirawat27/wut/wiki)
 
-## Performance
 
-WUT is designed to be fast and lightweight:
-
-- **Startup Time**: < 50ms
-- **Suggestion Response**: < 20ms  
-- **Memory Usage**: < 20MB
-- **Binary Size**: ~10-15MB
-- **Database Size**: ~5MB (with TLDR pages)
 
 ## Security and Privacy
 
 - All processing runs locally on your machine
 - No data is sent to external servers
-- Command history stored locally in SQLite database
+- Command history stored locally in BBolt database
 - Optional encryption for sensitive data
 - Open source - audit the code yourself
 
@@ -784,6 +858,7 @@ WUT is built with these excellent open-source projects:
 - [Cobra](https://github.com/spf13/cobra) - CLI framework
 - [Viper](https://github.com/spf13/viper) - Configuration management
 - [Lipgloss](https://github.com/charmbracelet/lipgloss) - Style definitions for terminal
+- [BBolt](https://github.com/etcd-io/bbolt) - Embedded key/value database
 - [TLDR Pages](https://tldr.sh/) - Community-driven command examples
 
 ## Support the Project

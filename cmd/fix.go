@@ -6,10 +6,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"wut/internal/corrector"
+	"wut/internal/ui"
 )
 
 // fixCmd corrects typos in commands
@@ -70,7 +70,7 @@ func runFix(cmd *cobra.Command, args []string) error {
 			fmt.Println()
 			fmt.Println("Modern alternatives:")
 			for _, alt := range alternatives {
-				fmt.Printf("  • %s\n", color.CyanString(alt))
+				fmt.Printf("  • %s\n", ui.Cyan(alt))
 			}
 		}
 
@@ -122,11 +122,11 @@ func displayCorrection(c *corrector.Correction) {
 	fmt.Println()
 
 	// Show original
-	fmt.Printf("  Original:  %s\n", color.RedString(c.Original))
+	fmt.Printf("  Original:  %s\n", ui.Red(c.Original))
 
 	// Show corrected
 	if c.Corrected != "" {
-		fmt.Printf("  Corrected: %s\n", color.GreenString(c.Corrected))
+		fmt.Printf("  Corrected: %s\n", ui.Green(c.Corrected))
 	}
 
 	// Show explanation
@@ -196,8 +196,8 @@ func listCommonTypos() error {
 	for _, typo := range keys {
 		correction := typos[typo]
 		fmt.Printf("  %s → %s\n",
-			color.RedString(typo),
-			color.GreenString(correction))
+			ui.Red(typo),
+			ui.Green(correction))
 	}
 
 	fmt.Println()

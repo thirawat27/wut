@@ -17,7 +17,7 @@ import (
 
 var (
 	// Version is set during build
-	Version = "dev"
+	Version = "0.1.0"
 	// BuildTime is set during build
 	BuildTime = "unknown"
 	// Commit is set during build
@@ -32,7 +32,7 @@ var (
 		Short: "Command Helper",
 		Long: `WUT is a command line assistant that helps you 
 find the right commands, correct typos, and learn new shell commands.`,
-		Version: fmt.Sprintf("%s (commit: %s, built: %s)", Version, Commit, BuildTime),
+		Version: "", // Will be set in init()
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return initialize(cmd.Context())
 		},
@@ -73,6 +73,15 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/wut/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "enable debug mode")
+}
+
+// SetVersionInfo updates the version string after variables are set
+func SetVersionInfo() {
+	if Commit == "unknown" && BuildTime == "unknown" {
+		rootCmd.Version = Version
+	} else {
+		rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", Version, Commit, BuildTime)
+	}
 }
 
 // initConfig reads in config file and ENV variables if set.

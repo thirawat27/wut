@@ -13,104 +13,103 @@ import (
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
-	"wut/internal/tldr"
+	"wut/internal/db"
 	"wut/internal/util"
 )
 
-// tldrCmd represents the tldr command
-var tldrCmd = &cobra.Command{
-	Use:   "tldr",
-	Short: "Manage TLDR Pages database",
-	Long: `Manage TLDR Pages database for offline access.
+// dbCmd represents the db command
+var dbCmd = &cobra.Command{
+	Use:   "db",
+	Short: "Manage command database",
+	Long: `Manage command database for offline access.
 
-TLDR Pages is a community-driven command line help database.
+The database contains command cheat sheets from TLDR Pages.
 This command allows you to sync and manage the local database.`,
 }
 
 var (
-	tldrSyncAll    bool
-	tldrSyncCmds   []string
-	tldrForce      bool
-	tldrOffline    bool
+	dbSyncAll bool
+	dbForce   bool
+	dbOffline bool
 )
 
-// tldrSyncCmd represents the sync subcommand
-var tldrSyncCmd = &cobra.Command{
+// dbSyncCmd represents the sync subcommand
+var dbSyncCmd = &cobra.Command{
 	Use:   "sync [commands...]",
-	Short: "Sync TLDR pages to local database",
-	Long: `Download and cache TLDR pages to local database for offline access.
+	Short: "Sync command pages to local database",
+	Long: `Download and cache command pages to local database for offline access.
 
-If no commands are specified, syncs all available commands.
-Use --popular to sync only popular commands.`,
-	Example: `  wut tldr sync                    # Sync popular commands
-  wut tldr sync git docker npm     # Sync specific commands
-  wut tldr sync --all              # Sync all commands (may take a while)
-  wut tldr sync --force            # Force update existing pages`,
-	RunE: runTLDRSync,
+If no commands are specified, syncs popular commands.
+Use --all to sync all available commands.`,
+	Example: `  wut db sync                    # Sync popular commands
+  wut db sync git docker npm     # Sync specific commands
+  wut db sync --all              # Sync all commands (may take a while)
+  wut db sync --force            # Force update existing pages`,
+	RunE: runDBSync,
 }
 
-// tldrStatusCmd represents the status subcommand
-var tldrStatusCmd = &cobra.Command{
+// dbStatusCmd represents the status subcommand
+var dbStatusCmd = &cobra.Command{
 	Use:   "status",
-	Short: "Show TLDR database status",
-	Long:  `Display information about the local TLDR database.`,
-	RunE:  runTLDRStatus,
+	Short: "Show database status",
+	Long:  `Display information about the local database.`,
+	RunE:  runDBStatus,
 }
 
-// tldrClearCmd represents the clear subcommand
-var tldrClearCmd = &cobra.Command{
+// dbClearCmd represents the clear subcommand
+var dbClearCmd = &cobra.Command{
 	Use:   "clear",
-	Short: "Clear local TLDR database",
-	Long:  `Remove all cached TLDR pages from local database.`,
-	RunE:  runTLDRClear,
+	Short: "Clear local database",
+	Long:  `Remove all cached command pages from local database.`,
+	RunE:  runDBClear,
 }
 
-// tldrUpdateCmd represents the update subcommand
-var tldrUpdateCmd = &cobra.Command{
+// dbUpdateCmd represents the update subcommand
+var dbUpdateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Update stale TLDR pages",
-	Long: `Check for and update stale TLDR pages in the local database.
+	Short: "Update stale command pages",
+	Long: `Check for and update stale command pages in the local database.
 
 By default, updates pages older than 7 days.`,
-	RunE: runTLDRUpdate,
+	RunE: runDBUpdate,
 }
 
 func init() {
-	rootCmd.AddCommand(tldrCmd)
+	rootCmd.AddCommand(dbCmd)
 
-	tldrCmd.AddCommand(tldrSyncCmd)
-	tldrCmd.AddCommand(tldrStatusCmd)
-	tldrCmd.AddCommand(tldrClearCmd)
-	tldrCmd.AddCommand(tldrUpdateCmd)
+	dbCmd.AddCommand(dbSyncCmd)
+	dbCmd.AddCommand(dbStatusCmd)
+	dbCmd.AddCommand(dbClearCmd)
+	dbCmd.AddCommand(dbUpdateCmd)
 
 	// Sync flags
-	tldrSyncCmd.Flags().BoolVarP(&tldrSyncAll, "all", "a", false, "sync all commands (may take a while)")
-	tldrSyncCmd.Flags().BoolVarP(&tldrForce, "force", "f", false, "force update existing pages")
-	tldrSyncCmd.Flags().BoolVar(&tldrOffline, "offline", false, "work in offline mode")
+	dbSyncCmd.Flags().BoolVarP(&dbSyncAll, "all", "a", false, "sync all commands (may take a while)")
+	dbSyncCmd.Flags().BoolVarP(&dbForce, "force", "f", false, "force update existing pages")
+	dbSyncCmd.Flags().BoolVar(&dbOffline, "offline", false, "work in offline mode")
 }
 
-func runTLDRSync(cmd *cobra.Command, args []string) error {
+func runDBSync(cmd *cobra.Command, args []string) error {
 	// Get database path
-	dbPath := getTLDRDBPath()
+	dbPath := getDBPath()
 
 	// Create storage
-	storage, err := tldr.NewStorage(dbPath)
+	storage, err := db.NewStorage(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer storage.Close()
 
 	// Create sync manager
-	syncManager := tldr.NewSyncManager(storage)
+	syncManager := db.NewSyncManager(storage)
 
 	ctx := context.Background()
-	var result *tldr.SyncResult
+	var result *db.SyncResult
 
-	fmt.Println("🔄 Syncing TLDR pages...")
+	fmt.Println("🔄 Syncing command database...")
 	fmt.Println()
 
 	// Determine what to sync
-	if tldrSyncAll {
+	if dbSyncAll {
 		// Sync all available commands
 		fmt.Println("This may take a while as we're downloading all pages...")
 		result, err = syncManager.SyncAll(ctx)
@@ -133,19 +132,19 @@ func runTLDRSync(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runTLDRStatus(cmd *cobra.Command, args []string) error {
-	dbPath := getTLDRDBPath()
+func runDBStatus(cmd *cobra.Command, args []string) error {
+	dbPath := getDBPath()
 
 	// Check if database exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
 		fmt.Println("❌ Local database not found")
 		fmt.Println()
-		fmt.Println("Run 'wut tldr sync' to create the database")
+		fmt.Println("Run 'wut db sync' to create the database")
 		return nil
 	}
 
 	// Open storage
-	storage, err := tldr.NewStorage(dbPath)
+	storage, err := db.NewStorage(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -163,8 +162,8 @@ func runTLDRStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runTLDRClear(cmd *cobra.Command, args []string) error {
-	dbPath := getTLDRDBPath()
+func runDBClear(cmd *cobra.Command, args []string) error {
+	dbPath := getDBPath()
 
 	// Check if database exists
 	if _, err := os.Stat(dbPath); os.IsNotExist(err) {
@@ -182,7 +181,7 @@ func runTLDRClear(cmd *cobra.Command, args []string) error {
 	}
 
 	// Open storage
-	storage, err := tldr.NewStorage(dbPath)
+	storage, err := db.NewStorage(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
@@ -198,18 +197,18 @@ func runTLDRClear(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runTLDRUpdate(cmd *cobra.Command, args []string) error {
-	dbPath := getTLDRDBPath()
+func runDBUpdate(cmd *cobra.Command, args []string) error {
+	dbPath := getDBPath()
 
 	// Open storage
-	storage, err := tldr.NewStorage(dbPath)
+	storage, err := db.NewStorage(dbPath)
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer storage.Close()
 
 	// Create sync manager
-	syncManager := tldr.NewSyncManager(storage)
+	syncManager := db.NewSyncManager(storage)
 
 	ctx := context.Background()
 
@@ -233,8 +232,8 @@ func runTLDRUpdate(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// getTLDRDBPath returns the path to the TLDR database
-func getTLDRDBPath() string {
+// getDBPath returns the path to the database
+func getDBPath() string {
 	cfg := config.Get()
 	if cfg.Database.Path != "" {
 		return filepath.Join(filepath.Dir(cfg.Database.Path), "tldr.db")
@@ -246,7 +245,7 @@ func getTLDRDBPath() string {
 }
 
 // formatSyncResult formats the sync result for display
-func formatSyncResult(result *tldr.SyncResult) string {
+func formatSyncResult(result *db.SyncResult) string {
 	var b strings.Builder
 
 	// Title
@@ -315,7 +314,7 @@ func formatStatus(stats map[string]interface{}) string {
 	title := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#7C3AED")).
-		Render("📊 TLDR Database Status")
+		Render("📊 Database Status")
 	b.WriteString(title)
 	b.WriteString("\n\n")
 

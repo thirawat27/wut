@@ -4,7 +4,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -249,11 +248,4 @@ func importShellHistory(ctx context.Context, storage *db.Storage) error {
 	return nil
 }
 
-// parseCategory extracts category from command
-func parseCategory(cmd string) string {
-	parts := strings.Fields(cmd)
-	if len(parts) > 0 {
-		return parts[0]
-	}
-	return "unknown"
-}
+

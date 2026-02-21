@@ -232,7 +232,17 @@ func DetectCurrentShell() string {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		if runtime.GOOS == "windows" {
-			return "powershell"
+			// Check COMSPEC for cmd.exe
+			if comspec := os.Getenv("COMSPEC"); comspec != "" {
+				if strings.Contains(strings.ToLower(comspec), "cmd") {
+					return "cmd"
+				}
+			}
+			// Check for PowerShell
+			if ps := os.Getenv("PSModulePath"); ps != "" {
+				return "powershell"
+			}
+			return "cmd" // default on Windows
 		}
 		return ""
 	}

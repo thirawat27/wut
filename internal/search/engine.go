@@ -329,12 +329,17 @@ func (e *Engine) searchPath(query Query) ([]Result, error) {
 
 // getDefaultSuggestions returns default suggestions when query is empty
 func (e *Engine) getDefaultSuggestions(query Query) ([]Result, error) {
+	// If storage is nil, return empty results
+	if e.storage == nil {
+		return []Result{}, nil
+	}
+	
 	ctx := context.Background()
 
 	// Get recent and frequent commands from history
 	history, err := e.storage.GetHistory(ctx, 100)
 	if err != nil {
-		return nil, err
+		return []Result{}, nil
 	}
 
 	var results []Result

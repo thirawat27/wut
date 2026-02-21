@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // Capabilities represents terminal capabilities
@@ -329,18 +331,7 @@ func (d *Detector) detectHyperlinkSupport() bool {
 
 // isTTY checks if stdout is a TTY
 func isTTY() bool {
-	if runtime.GOOS == "windows" {
-		// On Windows, check if we're in a console
-		return true // Simplified
-	}
-	
-	// Check if stdout is a terminal
-	fileInfo, err := os.Stdout.Stat()
-	if err != nil {
-		return false
-	}
-	
-	return (fileInfo.Mode() & os.ModeCharDevice) == os.ModeCharDevice
+	return term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 // GetRecommendedTheme returns the recommended theme based on terminal capabilities

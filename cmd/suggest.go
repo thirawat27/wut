@@ -10,12 +10,11 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
 	"wut/internal/logger"
-	"wut/internal/tldr"
+	"wut/internal/db"
 	"wut/internal/util"
 )
 
@@ -78,13 +77,13 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 	log.Debug("processing suggest request", "query", query, "raw", suggestRaw, "offline", suggestOffline)
 
 	// Get database path
-	dbPath := getTLDRDBPathForSuggest()
+	dbPath := getDBPathForSuggest()
 
 	// Open storage
-	var storage *tldr.Storage
+	var storage *db.Storage
 	var err error
 	if _, statErr := os.Stat(dbPath); statErr == nil {
-		storage, err = tldr.NewStorage(dbPath)
+		storage, err = db.NewStorage(dbPath)
 		if err != nil {
 			log.Warn("failed to open local storage", "error", err)
 		}
@@ -94,17 +93,17 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Create client with storage and options
-	clientOpts := []tldr.ClientOption{
-		tldr.WithAutoDetect(true), // Auto-detect online/offline
+	clientOpts := []db.ClientOption{
+		db.WithAutoDetect(true), // Auto-detect online/offline
 	}
 	if storage != nil {
-		clientOpts = append(clientOpts, tldr.WithStorage(storage))
+		clientOpts = append(clientOpts, db.WithStorage(storage))
 	}
 	if suggestOffline {
-		clientOpts = append(clientOpts, tldr.WithOfflineMode(true))
+		clientOpts = append(clientOpts, db.WithOfflineMode(true))
 	}
 
-	client := tldr.NewClient(clientOpts...)
+	client := db.NewClient(clientOpts...)
 
 	// Interactive mode - launch TUI
 	if query == "" && !suggestRaw {
@@ -121,7 +120,7 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 }
 
 // runInteractiveMode runs the interactive TUI mode
-func runInteractiveMode(client *tldr.Client, storage *tldr.Storage) error {
+func runInteractiveMode(client *db.Client, storage *db.Storage) error {
 	log := logger.With("suggest")
 	log.Debug("entering interactive mode")
 
@@ -130,12 +129,12 @@ func runInteractiveMode(client *tldr.Client, storage *tldr.Storage) error {
 	online := client.IsOnline(ctx)
 	if !online && !client.IsOfflineMode() {
 		fmt.Println("📴 Offline mode - using local database")
-		fmt.Println("   Run 'wut tldr sync' to download more commands")
+		fmt.Println("   Run 'wut db sync' to download more commands")
 		fmt.Println()
 	}
 
 	// Create and run TUI
-	model := tldr.NewModel()
+	model := db.NewModel()
 
 	// Set storage if available
 	if storage != nil {
@@ -150,11 +149,11 @@ func runInteractiveMode(client *tldr.Client, storage *tldr.Storage) error {
 	}
 
 	// Get selected command or executed command
-	if m, ok := finalModel.(*tldr.Model); ok {
+	if m, ok := finalModel.(*db.Model); ok {
 		// Check if a command should be executed
 		if cmd := m.GetExecutedCommand(); cmd != "" {
 			fmt.Printf("\n⚡ Executing: %s\n\n", cmd)
-			if err := tldr.ExecuteCommand(cmd); err != nil {
+			if err := db.ExecuteCommand(cmd); err != nil {
 				return fmt.Errorf("execution failed: %w", err)
 			}
 			return nil
@@ -170,7 +169,7 @@ func runInteractiveMode(client *tldr.Client, storage *tldr.Storage) error {
 }
 
 // runRawMode outputs command in plain text format
-func runRawMode(client *tldr.Client, query string) error {
+func runRawMode(client *db.Client, query string) error {
 	ctx := context.Background()
 
 	page, err := client.GetPageAnyPlatform(ctx, query)
@@ -194,7 +193,7 @@ func runRawMode(client *tldr.Client, query string) error {
 		} else {
 			fmt.Printf("Command not found: %s\n", query)
 			if client.IsOfflineMode() || !client.IsOnline(ctx) {
-				fmt.Println("📴 Run 'wut tldr sync' to download the database")
+				fmt.Println("📴 Run 'wut db sync' to download the database")
 			}
 		}
 		return nil
@@ -229,50 +228,27 @@ func runRawMode(client *tldr.Client, query string) error {
 }
 
 // runCommandMode runs with TUI for a specific command
-func runCommandMode(client *tldr.Client, query string, cfg *config.Config) error {
+func runCommandMode(client *db.Client, query string, cfg *config.Config) error {
 	ctx := context.Background()
 
 	page, err := client.GetPageAnyPlatform(ctx, query)
 	if err != nil {
 		fmt.Printf("Command not found: %s\n", query)
 		if client.IsOfflineMode() || !client.IsOnline(ctx) {
-			fmt.Println("📴 Run 'wut tldr sync' to download the database")
+			fmt.Println("📴 Run 'wut db sync' to download the database")
 		}
 		return nil
 	}
 
 	// Render with lipgloss
-	output := tldr.FormatPage(page)
+	output := db.FormatPage(page)
 	fmt.Println(output)
 
 	return nil
 }
 
-// formatSuggestions formats suggestions for terminal output (fallback)
-func formatSuggestions(suggestions []string, query string) string {
-	var b strings.Builder
-
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED")).
-		Render(fmt.Sprintf("Command '%s' not found. Did you mean:", query))
-
-	b.WriteString(title)
-	b.WriteString("\n\n")
-
-	for _, s := range suggestions {
-		item := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#10B981")).
-			Render(fmt.Sprintf("  • %s", s))
-		b.WriteString(item)
-		b.WriteString("\n")
-	}
-
-	return b.String()
-}
-
-// getTLDRDBPathForSuggest returns the path to the TLDR database
-func getTLDRDBPathForSuggest() string {
+// getDBPathForSuggest returns the path to the database
+func getDBPathForSuggest() string {
 	cfg := config.Get()
 	if cfg.Database.Path != "" {
 		return filepath.Join(filepath.Dir(cfg.Database.Path), "tldr.db")

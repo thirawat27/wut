@@ -360,6 +360,7 @@ func (fo *FanOut[T]) Process(ctx context.Context, items []T) error {
 	
 	// Send items
 	go func() {
+		defer close(itemChan)
 		for _, item := range items {
 			select {
 			case itemChan <- item:
@@ -367,7 +368,6 @@ func (fo *FanOut[T]) Process(ctx context.Context, items []T) error {
 				return
 			}
 		}
-		close(itemChan)
 	}()
 	
 	// Wait for completion
@@ -407,7 +407,7 @@ func (fi *FanIn[T]) AddInput(ch <-chan T) *FanIn[T] {
 
 // Merge merges all input channels into one output channel
 func (fi *FanIn[T]) Merge(ctx context.Context) <-chan T {
-	output := make(chan T)
+	output := make(chan T, len(fi.inputs))
 	
 	var wg sync.WaitGroup
 	

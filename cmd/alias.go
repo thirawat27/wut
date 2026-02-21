@@ -4,19 +4,18 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
 	appctx "wut/internal/context"
 	"wut/internal/alias"
+	"wut/internal/ui"
 )
 
 // aliasCmd manages shell aliases
@@ -189,7 +188,7 @@ func listAliases(manager *alias.Manager) error {
 		fmt.Println()
 
 		for _, a := range catAliases {
-			nameStyle := color.GreenString(a.Name)
+			nameStyle := ui.Green(a.Name)
 			fmt.Printf("  %s = %s\n", nameStyle, a.Command)
 			if a.Description != "" {
 				fmt.Printf("     %s\n", a.Description)
@@ -224,16 +223,4 @@ func detectShellForAlias() string {
 	return "bash"
 }
 
-func getShellConfig(shell string) string {
-	home, _ := os.UserHomeDir()
-	switch shell {
-	case "bash":
-		return filepath.Join(home, ".bashrc")
-	case "zsh":
-		return filepath.Join(home, ".zshrc")
-	case "fish":
-		return filepath.Join(home, ".config", "fish", "config.fish")
-	default:
-		return filepath.Join(home, ".bashrc")
-	}
-}
+

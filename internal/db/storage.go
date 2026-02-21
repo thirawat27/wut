@@ -1,83 +1,46 @@
-// Package db provides database storage for WUT
+// Package db provides TLDR Pages storage for offline access
 package db
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"os"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"go.etcd.io/bbolt"
 )
 
-var (
-	// Default bucket names
-	commandsBucket = []byte("commands")
-	historyBucket  = []byte("history")
-	configBucket   = []byte("config")
+const (
+	tldrBucketName = "tldr_pages"
+	metadataBucket = "tldr_metadata"
 )
 
-// Storage provides database operations
+// Storage provides local storage for TLDR pages
 type Storage struct {
 	db     *bbolt.DB
 	path   string
-	closed bool
 }
 
-// HistoryEntry represents a command history entry
-type HistoryEntry struct {
-	Command     string    `json:"command"`
-	Description string    `json:"description,omitempty"`
-	UsageCount  int       `json:"usage_count"`
-	LastUsed    time.Time `json:"last_used"`
-	FirstUsed   time.Time `json:"first_used"`
-	Directory   string    `json:"directory,omitempty"`
+// StoredPage represents a TLDR page stored locally
+type StoredPage struct {
+	Name        string    `json:"name"`
+	Platform    string    `json:"platform"`
+	Description string    `json:"description"`
+	Examples    []Example `json:"examples"`
+	RawContent  string    `json:"raw_content"`
+	FetchedAt   time.Time `json:"fetched_at"`
 }
 
-// HistoryStats represents history statistics
-type HistoryStats struct {
-	TotalCommands   int
-	UniqueCommands  int
-	MostUsedCommand string
-	MostUsedCount   int
-	AverageUsage    float64
-	TopCommands     []CommandStat
-	TopCategories   []CategoryStat
+// Metadata stores sync information
+type Metadata struct {
+	LastSync    time.Time `json:"last_sync"`
+	TotalPages  int       `json:"total_pages"`
+	Platforms   []string  `json:"platforms"`
 }
 
-// CommandStat represents command statistics
-type CommandStat struct {
-	Command string
-	Count   int
-}
-
-// CategoryStat represents category statistics
-type CategoryStat struct {
-	Name  string
-	Count int
-}
-
-// NewStorage creates a new storage instance
-func NewStorage(path string) (*Storage, error) {
-	// Expand path
-	if len(path) >= 2 && (path[:2] == "~/" || path[:2] == "~\\") {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, err
-		}
-		path = filepath.Join(home, path[2:])
-	}
-
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	// Open database
-	db, err := bbolt.Open(path, 0600, &bbolt.Options{
+// NewStorage creates a new TLDR storage
+func NewStorage(dbPath string) (*Storage, error) {
+	db, err := bbolt.Open(dbPath, 0600, &bbolt.Options{
 		Timeout: 1 * time.Second,
 	})
 	if err != nil {
@@ -86,261 +49,293 @@ func NewStorage(path string) (*Storage, error) {
 
 	// Create buckets
 	err = db.Update(func(tx *bbolt.Tx) error {
-		for _, bucket := range [][]byte{commandsBucket, historyBucket, configBucket} {
-			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
-				return err
-			}
+		if _, err := tx.CreateBucketIfNotExists([]byte(tldrBucketName)); err != nil {
+			return fmt.Errorf("create tldr bucket: %w", err)
+		}
+		if _, err := tx.CreateBucketIfNotExists([]byte(metadataBucket)); err != nil {
+			return fmt.Errorf("create metadata bucket: %w", err)
 		}
 		return nil
 	})
 	if err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to create buckets: %w", err)
+		return nil, err
 	}
 
 	return &Storage{
 		db:   db,
-		path: path,
+		path: dbPath,
 	}, nil
 }
 
-// Close closes the database
+// Close closes the storage
 func (s *Storage) Close() error {
-	if s.closed {
-		return nil
-	}
-	s.closed = true
 	return s.db.Close()
 }
 
-// AddHistory adds a command to history
-func (s *Storage) AddHistory(ctx context.Context, command string) error {
+// SavePage saves a TLDR page to local storage
+func (s *Storage) SavePage(page *Page) error {
+	stored := StoredPage{
+		Name:        page.Name,
+		Platform:    page.Platform,
+		Description: page.Description,
+		Examples:    page.Examples,
+		RawContent:  page.RawContent,
+		FetchedAt:   time.Now(),
+	}
+
+	data, err := json.Marshal(stored)
+	if err != nil {
+		return fmt.Errorf("failed to marshal page: %w", err)
+	}
+
+	key := fmt.Sprintf("%s/%s", page.Platform, page.Name)
+
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(historyBucket)
-
-		// Check if command already exists
-		existing := bucket.Get([]byte(command))
-		var entry HistoryEntry
-
-		if existing != nil {
-			if err := json.Unmarshal(existing, &entry); err != nil {
-				return err
-			}
-			entry.UsageCount++
-			entry.LastUsed = time.Now()
-		} else {
-			entry = HistoryEntry{
-				Command:    command,
-				UsageCount: 1,
-				FirstUsed:  time.Now(),
-				LastUsed:   time.Now(),
-			}
-		}
-
-		data, err := json.Marshal(entry)
-		if err != nil {
-			return err
-		}
-
-		return bucket.Put([]byte(command), data)
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.Put([]byte(key), data)
 	})
 }
 
-// GetHistory retrieves command history
-func (s *Storage) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, error) {
-	var entries []HistoryEntry
+// GetPage retrieves a TLDR page from local storage
+func (s *Storage) GetPage(name, platform string) (*Page, error) {
+	key := fmt.Sprintf("%s/%s", platform, name)
 
+	var stored StoredPage
 	err := s.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(historyBucket)
-
-		return bucket.ForEach(func(k, v []byte) error {
-			var entry HistoryEntry
-			if err := json.Unmarshal(v, &entry); err != nil {
-				return err
-			}
-			entries = append(entries, entry)
-
-			if limit > 0 && len(entries) >= limit {
-				return nil
-			}
-			return nil
-		})
-	})
-
-	return entries, err
-}
-
-// SearchHistory searches history
-func (s *Storage) SearchHistory(ctx context.Context, query string, limit int) ([]HistoryEntry, error) {
-	var entries []HistoryEntry
-
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(historyBucket)
-
-		return bucket.ForEach(func(k, v []byte) error {
-			if contains(string(k), query) {
-				var entry HistoryEntry
-				if err := json.Unmarshal(v, &entry); err != nil {
-					return err
-				}
-				entries = append(entries, entry)
-
-				if limit > 0 && len(entries) >= limit {
-					return nil
-				}
-			}
-			return nil
-		})
-	})
-
-	return entries, err
-}
-
-// ClearHistory clears all history
-func (s *Storage) ClearHistory(ctx context.Context) error {
-	return s.db.Update(func(tx *bbolt.Tx) error {
-		if err := tx.DeleteBucket(historyBucket); err != nil {
-			return err
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		data := bucket.Get([]byte(key))
+		if data == nil {
+			return fmt.Errorf("page not found")
 		}
-		_, err := tx.CreateBucket(historyBucket)
-		return err
+		return json.Unmarshal(data, &stored)
 	})
-}
-
-// GetHistoryCount returns the number of history entries
-func (s *Storage) GetHistoryCount(ctx context.Context) (int, error) {
-	var count int
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(historyBucket)
-		return bucket.ForEach(func(k, v []byte) error {
-			count++
-			return nil
-		})
-	})
-	return count, err
-}
-
-// GetHistoryStats returns history statistics
-func (s *Storage) GetHistoryStats(ctx context.Context) (*HistoryStats, error) {
-	entries, err := s.GetHistory(ctx, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	stats := &HistoryStats{
-		UniqueCommands: len(entries),
-		TopCommands:    make([]CommandStat, 0),
+	return &Page{
+		Name:        stored.Name,
+		Platform:    stored.Platform,
+		Description: stored.Description,
+		Examples:    stored.Examples,
+		RawContent:  stored.RawContent,
+	}, nil
+}
+
+// GetPageAnyPlatform tries to get a page from any available platform in local storage
+func (s *Storage) GetPageAnyPlatform(name string) (*Page, error) {
+	platforms := []string{
+		PlatformCommon,
+		PlatformLinux,
+		PlatformMacOS,
+		PlatformWindows,
+		PlatformFreeBSD,
+		PlatformOpenBSD,
+		PlatformNetBSD,
+		PlatformSunOS,
+		PlatformAndroid,
 	}
 
-	totalUsage := 0
-	for _, entry := range entries {
-		stats.TotalCommands += entry.UsageCount
-		totalUsage += entry.UsageCount
+	for _, platform := range platforms {
+		page, err := s.GetPage(name, platform)
+		if err == nil {
+			return page, nil
+		}
+	}
 
-		if entry.UsageCount > stats.MostUsedCount {
-			stats.MostUsedCount = entry.UsageCount
-			stats.MostUsedCommand = entry.Command
+	return nil, fmt.Errorf("page not found in local storage: %s", name)
+}
+
+// PageExists checks if a page exists in local storage
+func (s *Storage) PageExists(name, platform string) bool {
+	key := fmt.Sprintf("%s/%s", platform, name)
+	exists := false
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		exists = bucket.Get([]byte(key)) != nil
+		return nil
+	})
+
+	return exists && err == nil
+}
+
+// IsPageStale checks if a page is older than the given duration
+func (s *Storage) IsPageStale(name, platform string, maxAge time.Duration) bool {
+	key := fmt.Sprintf("%s/%s", platform, name)
+	isStale := true
+
+	s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		data := bucket.Get([]byte(key))
+		if data == nil {
+			return nil
 		}
 
-		stats.TopCommands = append(stats.TopCommands, CommandStat{
-			Command: entry.Command,
-			Count:   entry.UsageCount,
+		var stored StoredPage
+		if err := json.Unmarshal(data, &stored); err != nil {
+			return nil
+		}
+
+		isStale = time.Since(stored.FetchedAt) > maxAge
+		return nil
+	})
+
+	return isStale
+}
+
+// GetAllPages returns all pages from local storage
+func (s *Storage) GetAllPages() ([]StoredPage, error) {
+	var pages []StoredPage
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			var stored StoredPage
+			if err := json.Unmarshal(v, &stored); err == nil {
+				pages = append(pages, stored)
+			}
+			return nil
 		})
+	})
+
+	return pages, err
+}
+
+// GetPagesByPlatform returns all pages for a specific platform
+func (s *Storage) GetPagesByPlatform(platform string) ([]StoredPage, error) {
+	var pages []StoredPage
+	prefix := platform + "/"
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			if len(k) > len(prefix) && string(k[:len(prefix)]) == prefix {
+				var stored StoredPage
+				if err := json.Unmarshal(v, &stored); err == nil {
+					pages = append(pages, stored)
+				}
+			}
+			return nil
+		})
+	})
+
+	return pages, err
+}
+
+// DeletePage deletes a page from local storage
+func (s *Storage) DeletePage(name, platform string) error {
+	key := fmt.Sprintf("%s/%s", platform, name)
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.Delete([]byte(key))
+	})
+}
+
+// ClearAll removes all pages from local storage
+func (s *Storage) ClearAll() error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		if err := tx.DeleteBucket([]byte(tldrBucketName)); err != nil {
+			return err
+		}
+		if _, err := tx.CreateBucket([]byte(tldrBucketName)); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// SaveMetadata saves metadata to storage
+func (s *Storage) SaveMetadata(meta *Metadata) error {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	if len(entries) > 0 {
-		stats.AverageUsage = float64(totalUsage) / float64(len(entries))
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(metadataBucket))
+		return bucket.Put([]byte("metadata"), data)
+	})
+}
+
+// GetMetadata retrieves metadata from storage
+func (s *Storage) GetMetadata() (*Metadata, error) {
+	var meta Metadata
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(metadataBucket))
+		data := bucket.Get([]byte("metadata"))
+		if data == nil {
+			return fmt.Errorf("no metadata found")
+		}
+		return json.Unmarshal(data, &meta)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &meta, nil
+}
+
+// GetStats returns storage statistics
+func (s *Storage) GetStats() (map[string]interface{}, error) {
+	stats := map[string]interface{}{
+		"total_pages": 0,
+		"platforms":   map[string]int{},
+	}
+
+	pages, err := s.GetAllPages()
+	if err != nil {
+		return nil, err
+	}
+
+	platforms := map[string]int{}
+	for _, page := range pages {
+		platforms[page.Platform]++
+	}
+
+	stats["total_pages"] = len(pages)
+	stats["platforms"] = platforms
+
+	// Get last sync
+	if meta, err := s.GetMetadata(); err == nil {
+		stats["last_sync"] = meta.LastSync
 	}
 
 	return stats, nil
 }
 
-// GetCommandHistory gets command history as string slice
-func (s *Storage) GetCommandHistory(ctx context.Context, limit int) ([]string, error) {
-	entries, err := s.GetHistory(ctx, limit)
+// SearchLocal searches pages in local storage by name or description
+func (s *Storage) SearchLocal(query string) ([]StoredPage, error) {
+	var results []StoredPage
+	queryLower := ""
+	for _, r := range query {
+		queryLower += string(r | 32) // to lowercase
+	}
+
+	pages, err := s.GetAllPages()
 	if err != nil {
 		return nil, err
 	}
 
-	commands := make([]string, len(entries))
-	for i, entry := range entries {
-		commands[i] = entry.Command
-	}
-	return commands, nil
-}
+	for _, page := range pages {
+		nameLower := ""
+		for _, r := range page.Name {
+			nameLower += string(r | 32)
+		}
+		descLower := ""
+		for _, r := range page.Description {
+			descLower += string(r | 32)
+		}
 
-// ExportHistory exports history to a file
-func (s *Storage) ExportHistory(ctx context.Context, path string) error {
-	entries, err := s.GetHistory(ctx, 0)
-	if err != nil {
-		return err
-	}
-
-	data, err := json.MarshalIndent(entries, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(path, data, 0644)
-}
-
-// ImportHistory imports history from a file
-func (s *Storage) ImportHistory(ctx context.Context, path string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
-	}
-
-	var entries []HistoryEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return err
-	}
-
-	for _, entry := range entries {
-		if err := s.AddHistory(ctx, entry.Command); err != nil {
-			return err
+		if contains(nameLower, queryLower) || contains(descLower, queryLower) {
+			results = append(results, page)
 		}
 	}
 
-	return nil
-}
-
-// GetConfig gets a configuration value
-func (s *Storage) GetConfig(key string) ([]byte, error) {
-	var value []byte
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(configBucket)
-		v := bucket.Get([]byte(key))
-		if v != nil {
-			value = append([]byte{}, v...)
-		}
-		return nil
-	})
-	return value, err
-}
-
-// SetConfig sets a configuration value
-func (s *Storage) SetConfig(key string, value []byte) error {
-	return s.db.Update(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(configBucket)
-		return bucket.Put([]byte(key), value)
-	})
+	return results, nil
 }
 
 // contains checks if s contains substr
 func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(s[:len(substr)] == substr) ||
-		(s[len(s)-len(substr):] == substr) ||
-		containsSubstring(s, substr))
-}
-
-// containsSubstring checks if s contains substr anywhere
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
+	return strings.Contains(s, substr)
 }

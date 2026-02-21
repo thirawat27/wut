@@ -1,5 +1,5 @@
-// Package tldr provides TLDR Pages TUI for WUT
-package tldr
+// Package db provides TLDR Pages TUI for WUT
+package db
 
 import (
 	"context"
@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/atotto/clipboard"
-	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -90,17 +89,6 @@ var (
 		Foreground(mutedColor).
 		MarginTop(1)
 	
-	// Status bar style
-	statusBarStyle = lipgloss.NewStyle().
-		Foreground(textColor).
-		Background(bgColor).
-		Padding(0, 1)
-	
-	// Selected item style
-	selectedStyle = lipgloss.NewStyle().
-		Foreground(primaryColor).
-		Bold(true)
-	
 	// Border styles
 	boxStyle = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -115,29 +103,29 @@ var (
 		Bold(true)
 )
 
-// TLDRItem represents an item in the list
-type TLDRItem struct {
+// DBItem represents an item in the list
+type DBItem struct {
 	Page        *Page
 	ItemTitle   string
 	ItemDesc    string
 }
 
 // FilterValue implements list.Item interface
-func (i TLDRItem) FilterValue() string {
+func (i DBItem) FilterValue() string {
 	return i.ItemTitle
 }
 
 // Title returns the item title for the list
-func (i TLDRItem) Title() string {
+func (i DBItem) Title() string {
 	return i.ItemTitle
 }
 
 // Description returns the item description for the list
-func (i TLDRItem) Description() string {
+func (i DBItem) Description() string {
 	return i.ItemDesc
 }
 
-// Model represents the TLDR TUI model
+// Model represents the DB TUI model
 type Model struct {
 	client           *Client
 	storage          *Storage
@@ -159,69 +147,7 @@ type Model struct {
 	executedCmd      string // Store command to execute after TUI closes
 }
 
-// Key bindings
-type keyMap struct {
-	Search   key.Binding
-	Back     key.Binding
-	Quit     key.Binding
-	Copy     key.Binding
-	Execute  key.Binding
-	Next     key.Binding
-	Prev     key.Binding
-	PageUp   key.Binding
-	PageDown key.Binding
-	Top      key.Binding
-	Bottom   key.Binding
-}
-
-var keys = keyMap{
-	Search: key.NewBinding(
-		key.WithKeys("/"),
-		key.WithHelp("/", "search"),
-	),
-	Back: key.NewBinding(
-		key.WithKeys("esc", "backspace"),
-		key.WithHelp("esc", "back"),
-	),
-	Quit: key.NewBinding(
-		key.WithKeys("q", "ctrl+c"),
-		key.WithHelp("q", "quit"),
-	),
-	Copy: key.NewBinding(
-		key.WithKeys("c", "y"),
-		key.WithHelp("c/y", "copy cmd"),
-	),
-	Execute: key.NewBinding(
-		key.WithKeys("e", "enter"),
-		key.WithHelp("e/enter", "execute"),
-	),
-	Next: key.NewBinding(
-		key.WithKeys("down", "j", "tab"),
-		key.WithHelp("↓/j", "next"),
-	),
-	Prev: key.NewBinding(
-		key.WithKeys("up", "k", "shift+tab"),
-		key.WithHelp("↑/k", "prev"),
-	),
-	PageUp: key.NewBinding(
-		key.WithKeys("pgup", "ctrl+u"),
-		key.WithHelp("pgup", "page up"),
-	),
-	PageDown: key.NewBinding(
-		key.WithKeys("pgdown", "ctrl+d"),
-		key.WithHelp("pgdown", "page down"),
-	),
-	Top: key.NewBinding(
-		key.WithKeys("g", "home"),
-		key.WithHelp("g/home", "top"),
-	),
-	Bottom: key.NewBinding(
-		key.WithKeys("G", "end"),
-		key.WithHelp("G/end", "bottom"),
-	),
-}
-
-// NewModel creates a new TLDR TUI model
+// NewModel creates a new DB TUI model
 func NewModel() *Model {
 	// Setup input
 	input := textinput.New()
@@ -233,7 +159,7 @@ func NewModel() *Model {
 	// Setup list
 	items := []list.Item{}
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "TLDR Pages - Command Cheat Sheets"
+	l.Title = "Database - Command Cheat Sheets"
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(false)
 	
@@ -310,13 +236,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.viewport.SetContent(m.renderPage(page))
 					} else {
 						// Select from list
-						if item, ok := m.list.SelectedItem().(TLDRItem); ok {
+						if item, ok := m.list.SelectedItem().(DBItem); ok {
 							return m, m.showPage(item.Page.Name)
 						}
 					}
 				} else {
 					// Select from list
-					if item, ok := m.list.SelectedItem().(TLDRItem); ok {
+					if item, ok := m.list.SelectedItem().(DBItem); ok {
 						return m, m.showPage(item.Page.Name)
 					}
 				}
@@ -392,7 +318,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.pages = msg.pages
 			items := make([]list.Item, len(msg.pages))
 			for i, page := range msg.pages {
-				items[i] = TLDRItem{
+				items[i] = DBItem{
 					Page:      &page,
 					ItemTitle: page.Name,
 					ItemDesc:  page.Description,
@@ -458,7 +384,7 @@ func (m *Model) searchView() string {
 	var b strings.Builder
 	
 	// Title
-	title := titleStyle.Render("🔍 TLDR Pages - Command Cheat Sheets")
+	title := titleStyle.Render("🔍 Database - Command Cheat Sheets")
 	b.WriteString(title)
 	b.WriteString("\n")
 	

@@ -8,11 +8,11 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
 	"wut/internal/logger"
+	"wut/internal/ui"
 )
 
 // configCmd represents the config command
@@ -223,7 +223,7 @@ func showConfig() error {
 	fmt.Println()
 
 	// Show config file path
-	fmt.Println(color.HiBlackString("Configuration file: %s", getConfigFile()))
+	fmt.Println(ui.HiBlackf("Configuration file: %s", getConfigFile()))
 	fmt.Println()
 	fmt.Println("Use 'wut config --edit' to edit in your default editor")
 	fmt.Println("Use 'wut config --set <key> --value <value>' to change settings")

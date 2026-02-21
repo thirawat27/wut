@@ -26,7 +26,6 @@ func (f TaskFunc) Execute(ctx context.Context) error {
 type Result struct {
 	Task  Task
 	Error error
-	Index int
 }
 
 // Pool is a worker pool for concurrent task execution
@@ -100,19 +99,20 @@ func (p *Pool) Start() {
 // Stop stops the worker pool
 func (p *Pool) Stop() {
 	p.mu.Lock()
-	defer p.mu.Unlock()
 	
 	if !p.running {
+		p.mu.Unlock()
 		return
 	}
 	
+	p.running = false
 	p.cancel()
+	p.mu.Unlock()
+	
 	p.wg.Wait()
 	
 	close(p.queue)
 	close(p.results)
-	
-	p.running = false
 }
 
 // Submit submits a task to the pool
@@ -160,7 +160,7 @@ func (p *Pool) worker(id int) {
 			cancel()
 			
 			select {
-			case p.results <- Result{Task: task, Error: err, Index: id}:
+			case p.results <- Result{Task: task, Error: err}:
 			case <-p.ctx.Done():
 				return
 			}
@@ -381,7 +381,12 @@ func Debounce(fn func(), duration time.Duration) func() {
 		defer mu.Unlock()
 		
 		if timer != nil {
-			timer.Stop()
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 		}
 		
 		timer = time.AfterFunc(duration, fn)

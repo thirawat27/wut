@@ -7,10 +7,10 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
+	"wut/internal/ui"
 	appctx "wut/internal/context"
 	"wut/internal/corrector"
 	"wut/internal/db"
@@ -192,7 +192,7 @@ func printCorrection(c *corrector.Correction) {
 		fmt.Printf("%s %s → %s\n\n",
 			correctionStyle.Render("🤔 Did you mean:"),
 			c.Original,
-			color.GreenString(c.Corrected))
+			ui.Green(c.Corrected))
 	}
 }
 

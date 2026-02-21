@@ -16,7 +16,7 @@ func init() {
 	rootCmd.AddCommand(explainShortcutCmd())
 	rootCmd.AddCommand(aliasShortcutCmd())
 	rootCmd.AddCommand(configShortcutCmd())
-	rootCmd.AddCommand(tldrShortcutCmd())
+	rootCmd.AddCommand(dbShortcutCmd())
 	rootCmd.AddCommand(fixShortcutCmd())
 	rootCmd.AddCommand(smartShortcutCmd())
 }
@@ -168,31 +168,31 @@ func configShortcutCmd() *cobra.Command {
 	return cmd
 }
 
-// tldrShortcutCmd creates 't' as a shortcut for 'tldr'
-func tldrShortcutCmd() *cobra.Command {
+// dbShortcutCmd creates 't' as a shortcut for 'db'
+func dbShortcutCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "t",
-		Short: "Shortcut for 'tldr'",
-		Long: `Quick shortcut for the tldr command. Same as 'wut tldr'.
+		Short: "Shortcut for 'db'",
+		Long: `Quick shortcut for the db command. Same as 'wut db'.
 
 Available subcommands:
-  t sync    - Sync TLDR pages
-  t status  - Show TLDR database status
+  t sync    - Sync command database
+  t status  - Show database status
   t clear   - Clear local database
   t update  - Update stale pages`,
 		Example: `  wut t sync
   wut t status`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeMainCommand("tldr", "status")
+			return executeMainCommand("db", "status")
 		},
 	}
 	
 	// Add subcommands
 	cmd.AddCommand(&cobra.Command{
 		Use:   "sync [commands...]",
-		Short: "Sync TLDR pages",
+		Short: "Sync command database",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeMainCommand(append([]string{"tldr", "sync"}, args...)...)
+			return executeMainCommand(append([]string{"db", "sync"}, args...)...)
 		},
 	})
 	
@@ -200,7 +200,7 @@ Available subcommands:
 		Use:   "status",
 		Short: "Show database status",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeMainCommand("tldr", "status")
+			return executeMainCommand("db", "status")
 		},
 	})
 	
@@ -208,7 +208,7 @@ Available subcommands:
 		Use:   "clear",
 		Short: "Clear database",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeMainCommand("tldr", "clear")
+			return executeMainCommand("db", "clear")
 		},
 	})
 	
@@ -216,7 +216,7 @@ Available subcommands:
 		Use:   "update",
 		Short: "Update stale pages",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeMainCommand("tldr", "update")
+			return executeMainCommand("db", "update")
 		},
 	})
 	

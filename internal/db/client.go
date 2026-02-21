@@ -1,5 +1,5 @@
-// Package tldr provides TLDR Pages API client for WUT
-package tldr
+// Package db provides TLDR Pages API client for WUT
+package db
 
 import (
 	"context"
@@ -196,7 +196,7 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 		// Network error - auto fall back to offline mode if autoDetect is enabled
 		if c.autoDetect {
 			c.offlineMode = true
-			return nil, fmt.Errorf("offline mode: page not found in local storage: %s/%s (use 'wut tldr sync' to download)", platform, command)
+			return nil, fmt.Errorf("offline mode: page not found in local storage: %s/%s (use 'wut db sync' to download)", platform, command)
 		}
 		return nil, err
 	}

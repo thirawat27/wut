@@ -528,9 +528,11 @@ func (r *Reader) detectFishHistory(home string) string {
 	}
 
 	// Alternative location on macOS
-	path = filepath.Join(home, "Library", "Application Support", "fish", "fish_history")
-	if _, err := os.Stat(path); err == nil {
-		return path
+	if runtime.GOOS == "darwin" {
+		path = filepath.Join(home, "Library", "Application Support", "fish", "fish_history")
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
 	}
 
 	return ""

@@ -12,7 +12,7 @@ import (
 
 var (
 	// Version is set during build via ldflags
-	Version = "dev"
+	Version = "0.1.0"
 	// BuildTime is set during build via ldflags
 	BuildTime = "unknown"
 	// Commit is set during build via ldflags
@@ -26,6 +26,7 @@ func main() {
 	cmd.Version = Version
 	cmd.BuildTime = BuildTime
 	cmd.Commit = Commit
+	cmd.SetVersionInfo()
 
 	// Run the application
 	if err := run(); err != nil {

@@ -9,12 +9,12 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
 	"wut/internal/logger"
 	"wut/internal/shell"
+	"wut/internal/ui"
 )
 
 // initCmd initializes WUT for first-time use
@@ -157,7 +157,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 
 		if !initQuick {
-			fmt.Printf("   Detected shell: %s\n", color.CyanString(shellType))
+			fmt.Printf("   Detected shell: %s\n", ui.Cyan(shellType))
 			fmt.Println()
 
 			fmt.Print(subtitleStyle.Render("Would you like to set up shell integration? [Y/n]: "))
@@ -174,7 +174,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 			}
 		} else {
 			// Quick mode: just print instructions
-			fmt.Printf("Detected shell: %s\n", shellType)
+			fmt.Printf("Detected shell: %s\n", ui.Cyan(shellType))
 			fmt.Println("To enable shell integration, run:")
 			fmt.Printf("  wut install --shell %s\n", shellType)
 		}
@@ -195,9 +195,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 			if choice == "" || choice == "y" || choice == "yes" {
 				fmt.Println("   Downloading popular TLDR pages...")
-				// Run tldr sync
-				tldrCmd.SetArgs([]string{"sync"})
-				if err := tldrCmd.Execute(); err != nil {
+					// Run db sync
+				dbCmd.SetArgs([]string{"sync"})
+				if err := dbCmd.Execute(); err != nil {
 					fmt.Printf("   ⚠️  TLDR sync failed: %v\n", err)
 				} else {
 					fmt.Println("   ✓ TLDR pages downloaded")
@@ -281,7 +281,7 @@ func setupShellIntegration(shellType string) error {
 
 func boolToEnabled(b bool) string {
 	if b {
-		return color.GreenString("enabled")
+		return ui.Green("enabled")
 	}
-	return color.RedString("disabled")
+	return ui.Red("disabled")
 }

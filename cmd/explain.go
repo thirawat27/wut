@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
@@ -146,7 +145,7 @@ func displayExplanation(exp *Explanation, cfg *config.Config) error {
 	fmt.Println()
 
 	// Print command
-	fmt.Printf("Command: %s\n\n", color.CyanString(exp.Command))
+	fmt.Printf("Command: %s\n\n", ui.Cyan(exp.Command))
 
 	// Print summary
 	fmt.Printf("Summary: %s\n\n", exp.Summary)
@@ -158,8 +157,7 @@ func displayExplanation(exp *Explanation, cfg *config.Config) error {
 
 	// Print warnings for dangerous commands
 	if exp.IsDangerous && (explainDangerous || cfg.UI.ShowExplanations) {
-		warningColor := color.New(color.FgRed, color.Bold)
-		warningColor.Println("⚠️  WARNING: This command can be dangerous!")
+		fmt.Println(ui.Red("⚠️  WARNING: This command can be dangerous!"))
 		fmt.Printf("Danger Level: %s\n\n", exp.DangerLevel)
 
 		for _, warning := range exp.Warnings {
@@ -174,9 +172,9 @@ func displayExplanation(exp *Explanation, cfg *config.Config) error {
 		for _, arg := range exp.Arguments {
 			required := ""
 			if arg.Required {
-				required = color.RedString(" (required)")
+				required = ui.Red(" (required)")
 			}
-			fmt.Printf("  %s%s - %s\n", color.YellowString(arg.Name), required, arg.Description)
+			fmt.Printf("  %s%s - %s\n", ui.Yellow(arg.Name), required, arg.Description)
 		}
 		fmt.Println()
 	}
@@ -187,9 +185,9 @@ func displayExplanation(exp *Explanation, cfg *config.Config) error {
 		for _, flag := range exp.Flags {
 			flagStr := ""
 			if flag.IsShort {
-				flagStr += color.GreenString("-%s", flag.Name)
+				flagStr += ui.Greenf("-%s", flag.Name)
 			} else {
-				flagStr += color.GreenString("--%s", flag.Name)
+				flagStr += ui.Greenf("--%s", flag.Name)
 			}
 			fmt.Printf("  %s - %s\n", flagStr, flag.Description)
 		}
@@ -200,7 +198,7 @@ func displayExplanation(exp *Explanation, cfg *config.Config) error {
 	if len(exp.Examples) > 0 {
 		fmt.Println("Examples:")
 		for _, ex := range exp.Examples {
-			fmt.Printf("  $ %s\n", color.CyanString(ex.Command))
+			fmt.Printf("  $ %s\n", ui.Cyan(ex.Command))
 			fmt.Printf("    %s\n", ex.Description)
 		}
 		fmt.Println()

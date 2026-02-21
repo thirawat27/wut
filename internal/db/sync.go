@@ -1,5 +1,5 @@
-// Package tldr provides TLDR Pages sync functionality
-package tldr
+// Package db provides TLDR Pages sync functionality
+package db
 
 import (
 	"context"
@@ -47,7 +47,7 @@ func NewSyncManager(storage *Storage) *SyncManager {
 	return &SyncManager{
 		client:     NewClient(),
 		storage:    storage,
-		log:        logger.With("tldr-sync"),
+		log:        logger.With("db-sync"),
 		workerPool: pool,
 	}
 }

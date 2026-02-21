@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	version   = "dev"
+	version   = "0.1.0"
 	buildTime = time.Now().Format("2006-01-02_15:04:05")
 	commit    = "unknown"
 )

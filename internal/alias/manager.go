@@ -342,14 +342,19 @@ func (m *Manager) isValidName(name string) bool {
 func (m *Manager) loadFromShell() (map[string]string, error) {
 	aliases := make(map[string]string)
 
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return aliases, err
+	}
+
 	var configFile string
 	switch m.shell {
 	case "bash":
-		configFile = filepath.Join(os.Getenv("HOME"), ".bashrc")
+		configFile = filepath.Join(homeDir, ".bashrc")
 	case "zsh":
-		configFile = filepath.Join(os.Getenv("HOME"), ".zshrc")
+		configFile = filepath.Join(homeDir, ".zshrc")
 	case "fish":
-		configFile = filepath.Join(os.Getenv("HOME"), ".config", "fish", "config.fish")
+		configFile = filepath.Join(homeDir, ".config", "fish", "config.fish")
 	default:
 		return aliases, nil
 	}

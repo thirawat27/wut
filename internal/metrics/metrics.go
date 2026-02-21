@@ -70,7 +70,7 @@ func Initialize(version, commit string) *Metrics {
 // Get returns the global metrics instance
 func Get() *Metrics {
 	if globalMetrics == nil {
-		return Initialize("dev", "unknown")
+		return Initialize("0.1.0", "unknown")
 	}
 	return globalMetrics
 }
@@ -111,7 +111,15 @@ func (m *Metrics) IncrementActiveConnections() {
 
 // DecrementActiveConnections decrements active connections
 func (m *Metrics) DecrementActiveConnections() {
-	m.ActiveConnections.Add(-1)
+	for {
+		current := m.ActiveConnections.Load()
+		if current <= 0 {
+			return
+		}
+		if m.ActiveConnections.CompareAndSwap(current, current-1) {
+			return
+		}
+	}
 }
 
 // IncrementCounter increments a custom counter
