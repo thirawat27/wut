@@ -225,10 +225,8 @@ func getInstallPath() string {
 }
 
 func getGitInfo() {
-	// Try to get version from git tag
-	if out, err := exec.Command("git", "describe", "--tags", "--always", "--dirty").Output(); err == nil {
-		version = strings.TrimSpace(string(out))
-	}
+	// Version is hardcoded - edit this when releasing new version
+	version = "v0.1.0"
 	
 	// Try to get commit hash
 	if out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output(); err == nil {

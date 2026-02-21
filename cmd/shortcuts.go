@@ -168,20 +168,20 @@ func configShortcutCmd() *cobra.Command {
 	return cmd
 }
 
-// dbShortcutCmd creates 't' as a shortcut for 'db'
+// dbShortcutCmd creates 'd' as a shortcut for 'db'
 func dbShortcutCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "t",
+		Use:   "d",
 		Short: "Shortcut for 'db'",
 		Long: `Quick shortcut for the db command. Same as 'wut db'.
 
 Available subcommands:
-  t sync    - Sync command database
-  t status  - Show database status
-  t clear   - Clear local database
-  t update  - Update stale pages`,
-		Example: `  wut t sync
-  wut t status`,
+  d sync    - Sync command database
+  d status  - Show database status
+  d clear   - Clear local database
+  d update  - Update stale pages`,
+		Example: `  wut d sync
+  wut d status`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return executeMainCommand("db", "status")
 		},
