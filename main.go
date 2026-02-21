@@ -17,8 +17,6 @@ var (
 	BuildTime = "unknown"
 	// Commit is set during build via ldflags
 	Commit = "unknown"
-	// BuildHost is set during build via ldflags
-	BuildHost = "unknown"
 	// GoVersion is the Go version used to build
 	GoVersion = runtime.Version()
 )

@@ -1,4 +1,4 @@
-// Package fuzzy provides fuzzy matching functionality for WUT
+// Package fuzzy provides advanced fuzzy matching functionality for WUT
 package fuzzy
 
 import (
@@ -6,322 +6,430 @@ import (
 	"unicode"
 
 	"github.com/agnivade/levenshtein"
-	"github.com/sahilm/fuzzy"
 )
 
-// Match represents a fuzzy match result
-type Match struct {
-	Text        string  // Matched text
-	Score       int     // Match score (higher is better)
-	Distance    int     // Levenshtein distance (lower is better)
-	Confidence  float64 // Confidence score (0-1)
-	MatchedIndices []int // Indices of matched characters
-}
+// Algorithm represents the fuzzy matching algorithm type
+type Algorithm string
 
-// Matcher provides fuzzy matching capabilities
+const (
+	// AlgorithmLevenshtein uses Levenshtein distance
+	AlgorithmLevenshtein Algorithm = "levenshtein"
+	// AlgorithmPrefix gives higher score to prefix matches
+	AlgorithmPrefix Algorithm = "prefix"
+	// AlgorithmContains gives higher score to substring matches
+	AlgorithmContains Algorithm = "contains"
+	// AlgorithmHybrid combines multiple algorithms
+	AlgorithmHybrid Algorithm = "hybrid"
+)
+
+// Matcher provides fuzzy string matching with multiple algorithms
 type Matcher struct {
 	caseSensitive bool
 	maxDistance   int
 	threshold     float64
+	algorithm     Algorithm
+	
+	// Weights for hybrid algorithm
+	prefixWeight    float64
+	containsWeight  float64
+	levenshteinWeight float64
 }
 
-// NewMatcher creates a new fuzzy matcher
+// Match represents a fuzzy match result
+type Match struct {
+	Confidence float64
+	Distance   int
+	Algorithm  Algorithm
+	MatchedAt  int // Position where match starts (for highlighting)
+	
+	// Detailed scores for debugging/analysis
+	PrefixScore    float64
+	ContainsScore  float64
+	LevenshteinScore float64
+}
+
+// MatchOptions represents options for matching
+type MatchOptions struct {
+	Algorithm     Algorithm
+	CaseSensitive bool
+	MaxDistance   int
+	Threshold     float64
+}
+
+// NewMatcher creates a new fuzzy matcher with default settings
 func NewMatcher(caseSensitive bool, maxDistance int, threshold float64) *Matcher {
 	return &Matcher{
-		caseSensitive: caseSensitive,
-		maxDistance:   maxDistance,
-		threshold:     threshold,
+		caseSensitive:     caseSensitive,
+		maxDistance:       maxDistance,
+		threshold:         threshold,
+		algorithm:         AlgorithmHybrid,
+		prefixWeight:      0.4,
+		containsWeight:    0.3,
+		levenshteinWeight: 0.3,
 	}
 }
 
-// FindMatches finds matches for a pattern in a list of candidates
-func (m *Matcher) FindMatches(pattern string, candidates []string) []Match {
-	if !m.caseSensitive {
-		pattern = strings.ToLower(pattern)
+// NewMatcherWithOptions creates a new fuzzy matcher with options
+func NewMatcherWithOptions(opts MatchOptions) *Matcher {
+	m := NewMatcher(opts.CaseSensitive, opts.MaxDistance, opts.Threshold)
+	m.algorithm = opts.Algorithm
+	return m
+}
+
+// SetAlgorithm sets the matching algorithm
+func (m *Matcher) SetAlgorithm(alg Algorithm) {
+	m.algorithm = alg
+}
+
+// SetWeights sets the weights for hybrid algorithm
+func (m *Matcher) SetWeights(prefix, contains, levenshtein float64) {
+	m.prefixWeight = prefix
+	m.containsWeight = contains
+	m.levenshteinWeight = levenshtein
+}
+
+// Match performs fuzzy matching between query and target
+func (m *Matcher) Match(query, target string) *Match {
+	if query == "" {
+		return &Match{Confidence: 0, Distance: 0, Algorithm: m.algorithm}
+	}
+	
+	if query == target {
+		return &Match{Confidence: 1.0, Distance: 0, Algorithm: m.algorithm, MatchedAt: 0}
 	}
 
-	var matches []Match
-	for _, candidate := range candidates {
-		match := m.Match(pattern, candidate)
+	originalTarget := target
+	
+	if !m.caseSensitive {
+		query = toLower(query)
+		target = toLower(target)
+	}
+
+	switch m.algorithm {
+	case AlgorithmLevenshtein:
+		return m.matchLevenshtein(query, target)
+	case AlgorithmPrefix:
+		return m.matchPrefix(query, target)
+	case AlgorithmContains:
+		return m.matchContains(query, target, originalTarget)
+	case AlgorithmHybrid:
+		return m.matchHybrid(query, target, originalTarget)
+	default:
+		return m.matchHybrid(query, target, originalTarget)
+	}
+}
+
+// MatchMultiple matches query against multiple targets and returns sorted results
+func (m *Matcher) MatchMultiple(query string, targets []string) []MatchResult {
+	results := make([]MatchResult, 0, len(targets))
+	
+	for i, target := range targets {
+		match := m.Match(query, target)
 		if match.Confidence >= m.threshold {
-			matches = append(matches, match)
-		}
-	}
-
-	// Sort by score (descending)
-	sortMatches(matches)
-	return matches
-}
-
-// Match performs a single fuzzy match
-func (m *Matcher) Match(pattern, text string) Match {
-	originalText := text
-	if !m.caseSensitive {
-		pattern = strings.ToLower(pattern)
-		text = strings.ToLower(text)
-	}
-
-	// Calculate Levenshtein distance
-	distance := levenshtein.ComputeDistance(pattern, text)
-
-	// Use sahil/fuzzy for better matching
-	fuzzyMatches := fuzzy.Find(pattern, []string{text})
-
-	var score int
-	var matchedIndices []int
-
-	if len(fuzzyMatches) > 0 {
-		score = fuzzyMatches[0].Score
-		matchedIndices = fuzzyMatches[0].MatchedIndexes
-	}
-
-	// Calculate confidence
-	confidence := calculateConfidence(pattern, text, distance, score)
-
-	return Match{
-		Text:           originalText,
-		Score:          score,
-		Distance:       distance,
-		Confidence:     confidence,
-		MatchedIndices: matchedIndices,
-	}
-}
-
-// MatchWithSource performs matching with source information
-type MatchWithSource struct {
-	Match
-	Source      string // Source of the match (e.g., "history", "alias", "builtin")
-	Description string // Optional description
-}
-
-// FindMatchesMultiSource finds matches from multiple sources
-func (m *Matcher) FindMatchesMultiSource(pattern string, sources map[string][]string) []MatchWithSource {
-	var allMatches []MatchWithSource
-
-	for source, candidates := range sources {
-		matches := m.FindMatches(pattern, candidates)
-		for _, match := range matches {
-			allMatches = append(allMatches, MatchWithSource{
-				Match:  match,
-				Source: source,
+			results = append(results, MatchResult{
+				Target:    target,
+				Index:     i,
+				Match:     match,
 			})
 		}
 	}
-
-	// Sort by confidence (descending)
-	sortMatchesWithSource(allMatches)
-	return allMatches
+	
+	// Sort by confidence (highest first)
+	sortResults(results)
+	return results
 }
 
-// SuggestCorrections suggests corrections for a typo
-func (m *Matcher) SuggestCorrections(typo string, dictionary []string, maxSuggestions int) []Match {
-	matches := m.FindMatches(typo, dictionary)
-
-	// Filter by max distance
-	var filtered []Match
-	for _, match := range matches {
-		if match.Distance <= m.maxDistance {
-			filtered = append(filtered, match)
-		}
-	}
-
-	// Limit results
-	if maxSuggestions > 0 && len(filtered) > maxSuggestions {
-		filtered = filtered[:maxSuggestions]
-	}
-
-	return filtered
+// MatchResult represents a match against a specific target
+type MatchResult struct {
+	Target string
+	Index  int
+	Match  *Match
 }
 
-// IsTypo checks if a word is likely a typo of any word in the dictionary
-func (m *Matcher) IsTypo(word string, dictionary []string) bool {
-	// Exact match
-	for _, dictWord := range dictionary {
-		if !m.caseSensitive {
-			if strings.EqualFold(word, dictWord) {
-				return false
-			}
-		} else {
-			if word == dictWord {
-				return false
-			}
-		}
+// matchLevenshtein performs pure Levenshtein distance matching
+func (m *Matcher) matchLevenshtein(query, target string) *Match {
+	distance := levenshtein.ComputeDistance(query, target)
+	
+	// Apply max distance filter
+	if m.maxDistance > 0 && distance > m.maxDistance {
+		return &Match{Confidence: 0, Distance: distance, Algorithm: AlgorithmLevenshtein}
 	}
-
-	// Check for close matches
-	matches := m.FindMatches(word, dictionary)
-	for _, match := range matches {
-		if match.Distance <= m.maxDistance && match.Confidence >= m.threshold {
-			return true
-		}
-	}
-
-	return false
-}
-
-// calculateConfidence calculates a confidence score
-func calculateConfidence(pattern, text string, distance, score int) float64 {
-	if len(pattern) == 0 {
-		return 0
-	}
-
-	// Base confidence on Levenshtein distance
-	maxLen := len(pattern)
-	if len(text) > maxLen {
-		maxLen = len(text)
-	}
+	
+	maxLen := max(len(query), len(target))
 	if maxLen == 0 {
-		return 1.0
+		return &Match{Confidence: 1.0, Distance: 0, Algorithm: AlgorithmLevenshtein}
 	}
 
-	distanceConfidence := 1.0 - float64(distance)/float64(maxLen)
-
-	// Factor in fuzzy score
-	scoreConfidence := float64(score) / float64(len(pattern)*10)
-	if scoreConfidence > 1.0 {
-		scoreConfidence = 1.0
-	}
-
-	// Weighted average
-	confidence := (distanceConfidence*0.6 + scoreConfidence*0.4)
-
+	confidence := 1.0 - float64(distance)/float64(maxLen)
 	if confidence < 0 {
 		confidence = 0
 	}
-	if confidence > 1 {
-		confidence = 1
-	}
 
-	return confidence
+	return &Match{
+		Confidence:       confidence,
+		Distance:         distance,
+		Algorithm:        AlgorithmLevenshtein,
+		LevenshteinScore: confidence,
+	}
 }
 
-// sortMatches sorts matches by score (descending)
-func sortMatches(matches []Match) {
-	for i := 0; i < len(matches)-1; i++ {
-		for j := i + 1; j < len(matches); j++ {
-			if matches[j].Score > matches[i].Score ||
-				(matches[j].Score == matches[i].Score && matches[j].Confidence > matches[i].Confidence) {
-				matches[i], matches[j] = matches[j], matches[i]
+// matchPrefix performs prefix-based matching
+func (m *Matcher) matchPrefix(query, target string) *Match {
+	if strings.HasPrefix(target, query) {
+		// Exact prefix match
+		confidence := 0.9 + (0.1 * (1.0 - float64(len(query))/float64(len(target))))
+		return &Match{
+			Confidence: confidence,
+			Distance:   0,
+			Algorithm:  AlgorithmPrefix,
+			MatchedAt:  0,
+			PrefixScore: confidence,
+		}
+	}
+	
+	// Try to find if query is a prefix of any word in target
+	words := strings.Fields(target)
+	for _, word := range words {
+		if strings.HasPrefix(word, query) {
+			confidence := 0.7 + (0.2 * (1.0 - float64(len(query))/float64(len(word))))
+			return &Match{
+				Confidence:  confidence,
+				Distance:    0,
+				Algorithm:   AlgorithmPrefix,
+				PrefixScore: confidence,
+			}
+		}
+	}
+	
+	// Fallback to Levenshtein with reduced confidence
+	result := m.matchLevenshtein(query, target)
+	result.Confidence *= 0.5
+	result.Algorithm = AlgorithmPrefix
+	return result
+}
+
+// matchContains performs substring matching
+func (m *Matcher) matchContains(query, target, originalTarget string) *Match {
+	idx := strings.Index(target, query)
+	if idx >= 0 {
+		// Exact substring match
+		confidence := 0.8 + (0.15 * (float64(len(query)) / float64(len(target))))
+		if idx == 0 {
+			confidence += 0.05 // Bonus for matching at start
+		}
+		return &Match{
+			Confidence:    confidence,
+			Distance:      0,
+			Algorithm:     AlgorithmContains,
+			MatchedAt:     idx,
+			ContainsScore: confidence,
+		}
+	}
+	
+	// Check if all characters appear in order (fuzzy contains)
+	if matched, positions := fuzzyContains(query, target); matched {
+		confidence := 0.5 + (0.3 * (float64(len(positions)) / float64(len(target))))
+		return &Match{
+			Confidence:    confidence,
+			Distance:      len(target) - len(positions),
+			Algorithm:     AlgorithmContains,
+			MatchedAt:     positions[0],
+			ContainsScore: confidence,
+		}
+	}
+	
+	// Fallback to Levenshtein
+	result := m.matchLevenshtein(query, target)
+	result.Algorithm = AlgorithmContains
+	return result
+}
+
+// matchHybrid combines multiple matching strategies
+func (m *Matcher) matchHybrid(query, target, originalTarget string) *Match {
+	prefixMatch := m.matchPrefix(query, target)
+	containsMatch := m.matchContains(query, target, originalTarget)
+	levenshteinMatch := m.matchLevenshtein(query, target)
+	
+	// Calculate weighted confidence
+	confidence := (prefixMatch.Confidence * m.prefixWeight) +
+		(containsMatch.Confidence * m.containsWeight) +
+		(levenshteinMatch.Confidence * m.levenshteinWeight)
+	
+	// Boost confidence for exact or near-exact matches
+	if levenshteinMatch.Distance == 0 && prefixMatch.Confidence > 0.9 {
+		confidence = 1.0
+	}
+	
+	// Determine best algorithm and matched position
+	matchedAt := -1
+	
+	if prefixMatch.Confidence > containsMatch.Confidence && prefixMatch.Confidence > levenshteinMatch.Confidence {
+		matchedAt = 0
+	} else if containsMatch.Confidence > levenshteinMatch.Confidence {
+		matchedAt = containsMatch.MatchedAt
+	}
+	
+	return &Match{
+		Confidence:       confidence,
+		Distance:         levenshteinMatch.Distance,
+		Algorithm:        AlgorithmHybrid,
+		MatchedAt:        matchedAt,
+		PrefixScore:      prefixMatch.Confidence,
+		ContainsScore:    containsMatch.Confidence,
+		LevenshteinScore: levenshteinMatch.Confidence,
+	}
+}
+
+// fuzzyContains checks if all characters of query appear in target in order
+func fuzzyContains(query, target string) (bool, []int) {
+	if len(query) == 0 {
+		return true, []int{}
+	}
+	if len(target) == 0 {
+		return false, nil
+	}
+	
+	positions := make([]int, 0, len(query))
+	targetIdx := 0
+	
+	for _, queryRune := range query {
+		found := false
+		for targetIdx < len(target) {
+			if rune(target[targetIdx]) == queryRune {
+				positions = append(positions, targetIdx)
+				targetIdx++
+				found = true
+				break
+			}
+			targetIdx++
+		}
+		if !found {
+			return false, nil
+		}
+	}
+	
+	return true, positions
+}
+
+// HighlightMatch returns the target with the matched portion highlighted
+func (m *Matcher) HighlightMatch(query, target string, highlightFunc func(string) string) string {
+	if query == "" || highlightFunc == nil {
+		return target
+	}
+	
+	match := m.Match(query, target)
+	if match.MatchedAt < 0 || match.MatchedAt >= len(target) {
+		return target
+	}
+	
+	// Determine match length
+	matchLen := len(query)
+	if match.Algorithm == AlgorithmLevenshtein {
+		// For Levenshtein, try to find best matching substring
+		return target // Skip highlighting for pure Levenshtein
+	}
+	
+	endPos := match.MatchedAt + matchLen
+	if endPos > len(target) {
+		endPos = len(target)
+	}
+	
+	before := target[:match.MatchedAt]
+	matched := target[match.MatchedAt:endPos]
+after := ""
+	if endPos < len(target) {
+		after = target[endPos:]
+	}
+	
+	return before + highlightFunc(matched) + after
+}
+
+// sortResults sorts match results by confidence (descending)
+func sortResults(results []MatchResult) {
+	for i := 0; i < len(results); i++ {
+		for j := i + 1; j < len(results); j++ {
+			if results[j].Match.Confidence > results[i].Match.Confidence {
+				results[i], results[j] = results[j], results[i]
 			}
 		}
 	}
 }
 
-// sortMatchesWithSource sorts matches with source by confidence (descending)
-func sortMatchesWithSource(matches []MatchWithSource) {
-	for i := 0; i < len(matches)-1; i++ {
-		for j := i + 1; j < len(matches); j++ {
-			if matches[j].Confidence > matches[i].Confidence ||
-				(matches[j].Confidence == matches[i].Confidence && matches[j].Score > matches[i].Score) {
-				matches[i], matches[j] = matches[j], matches[i]
-			}
-		}
+// toLower converts string to lowercase (Unicode-aware)
+func toLower(s string) string {
+	return strings.Map(func(r rune) rune {
+		return unicode.ToLower(r)
+	}, s)
+}
+
+// max returns the maximum of two integers
+func max(a, b int) int {
+	if a > b {
+		return a
 	}
+	return b
 }
 
 // NormalizeString normalizes a string for better matching
 func NormalizeString(s string) string {
 	// Convert to lowercase
 	s = strings.ToLower(s)
-
+	
 	// Remove extra whitespace
 	s = strings.Join(strings.Fields(s), " ")
-
-	// Remove special characters
-	var result strings.Builder
-	for _, r := range s {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r) {
-			result.WriteRune(r)
-		}
-	}
-
-	return result.String()
+	
+	// Remove common punctuation that might interfere with matching
+	s = strings.ReplaceAll(s, "_", " ")
+	s = strings.ReplaceAll(s, "-", " ")
+	
+	return strings.TrimSpace(s)
 }
 
-// PrefixMatcher provides prefix-based matching
-type PrefixMatcher struct {
-	caseSensitive bool
-}
-
-// NewPrefixMatcher creates a new prefix matcher
-func NewPrefixMatcher(caseSensitive bool) *PrefixMatcher {
-	return &PrefixMatcher{caseSensitive: caseSensitive}
-}
-
-// MatchPrefix finds all strings that start with the prefix
-func (pm *PrefixMatcher) MatchPrefix(prefix string, candidates []string) []string {
-	if !pm.caseSensitive {
-		prefix = strings.ToLower(prefix)
-	}
-
-	var matches []string
-	for _, candidate := range candidates {
-		testCandidate := candidate
-		if !pm.caseSensitive {
-			testCandidate = strings.ToLower(candidate)
-		}
-
-		if strings.HasPrefix(testCandidate, prefix) {
-			matches = append(matches, candidate)
+// Tokenize splits a string into searchable tokens
+func Tokenize(s string) []string {
+	s = NormalizeString(s)
+	
+	// Split by whitespace and common delimiters
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '-' || r == '_' || r == '.' || r == '/'
+	})
+	
+	// Remove duplicates and empty strings
+	seen := make(map[string]bool)
+	tokens := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if f != "" && !seen[f] {
+			seen[f] = true
+			tokens = append(tokens, f)
 		}
 	}
-
-	return matches
+	
+	return tokens
 }
 
-// TokenMatcher provides token-based matching
-type TokenMatcher struct {
-	caseSensitive bool
-}
-
-// NewTokenMatcher creates a new token matcher
-func NewTokenMatcher(caseSensitive bool) *TokenMatcher {
-	return &TokenMatcher{caseSensitive: caseSensitive}
-}
-
-// MatchTokens finds matches based on token containment
-func (tm *TokenMatcher) MatchTokens(query string, candidates []string) []Match {
-	if !tm.caseSensitive {
-		query = strings.ToLower(query)
+// CalculateRelevance calculates a relevance score for ranking
+func CalculateRelevance(query, target string, match *Match) float64 {
+	baseScore := match.Confidence
+	
+	// Boost exact matches
+	if strings.EqualFold(query, target) {
+		baseScore += 0.5
 	}
-
-	queryTokens := strings.Fields(query)
-	if len(queryTokens) == 0 {
-		return nil
+	
+	// Boost prefix matches
+	if strings.HasPrefix(strings.ToLower(target), strings.ToLower(query)) {
+		baseScore += 0.2
 	}
-
-	var matches []Match
-	for _, candidate := range candidates {
-		testCandidate := candidate
-		if !tm.caseSensitive {
-			testCandidate = strings.ToLower(candidate)
-		}
-
-		candidateTokens := strings.Fields(testCandidate)
-
-		// Count matching tokens
-		matchCount := 0
-		for _, qt := range queryTokens {
-			for _, ct := range candidateTokens {
-				if strings.Contains(ct, qt) || levenshtein.ComputeDistance(qt, ct) <= 1 {
-					matchCount++
-					break
-				}
-			}
-		}
-
-		if matchCount > 0 {
-			confidence := float64(matchCount) / float64(len(queryTokens))
-			if confidence >= 0.5 {
-				matches = append(matches, Match{
-					Text:       candidate,
-					Score:      matchCount,
-					Confidence: confidence,
-				})
-			}
-		}
+	
+	// Boost shorter targets (more specific matches)
+	if len(target) < len(query)*2 {
+		baseScore += 0.1 * (1.0 - float64(len(target))/float64(len(query)*2))
 	}
-
-	sortMatches(matches)
-	return matches
+	
+	// Cap at 1.0
+	if baseScore > 1.0 {
+		baseScore = 1.0
+	}
+	
+	return baseScore
 }

@@ -174,15 +174,130 @@ func showConfig() error {
 }
 
 func getConfigValue(key string) (interface{}, error) {
-	// Simplified implementation
-	// In production, this would use reflection to get nested values
-	return nil, fmt.Errorf("not implemented: get %s", key)
+	cfg := config.Get()
+	
+	// Simple key lookup for common config values
+	switch key {
+	case "ai.enabled":
+		return cfg.AI.Enabled, nil
+	case "ai.model.type":
+		return cfg.AI.Model.Type, nil
+	case "ai.model.quantized":
+		return cfg.AI.Model.Quantized, nil
+	case "ai.training.epochs":
+		return cfg.AI.Training.Epochs, nil
+	case "ai.training.learning_rate":
+		return cfg.AI.Training.LearningRate, nil
+	case "ai.training.batch_size":
+		return cfg.AI.Training.BatchSize, nil
+	case "ai.inference.max_suggestions":
+		return cfg.AI.Inference.MaxSuggestions, nil
+	case "ai.inference.confidence_threshold":
+		return cfg.AI.Inference.ConfidenceThreshold, nil
+	case "ui.theme":
+		return cfg.UI.Theme, nil
+	case "ui.show_confidence":
+		return cfg.UI.ShowConfidence, nil
+	case "ui.show_explanations":
+		return cfg.UI.ShowExplanations, nil
+	case "database.path":
+		return cfg.Database.Path, nil
+	case "history.enabled":
+		return cfg.History.Enabled, nil
+	case "history.max_entries":
+		return cfg.History.MaxEntries, nil
+	case "fuzzy.enabled":
+		return cfg.Fuzzy.Enabled, nil
+	case "fuzzy.threshold":
+		return cfg.Fuzzy.Threshold, nil
+	case "context.enabled":
+		return cfg.Context.Enabled, nil
+	case "logging.level":
+		return cfg.Logging.Level, nil
+	case "app.debug":
+		return cfg.App.Debug, nil
+	default:
+		return nil, fmt.Errorf("unknown config key: %s", key)
+	}
 }
 
 func setConfigValue(key, value string) error {
-	// Simplified implementation
-	// In production, this would parse the key and update the config
-	return fmt.Errorf("not implemented: set %s = %s", key, value)
+	cfg := config.Get()
+	
+	// Simple key update for common config values
+	switch key {
+	case "ai.enabled":
+		cfg.AI.Enabled = value == "true" || value == "1"
+	case "ai.model.type":
+		cfg.AI.Model.Type = value
+	case "ai.model.quantized":
+		cfg.AI.Model.Quantized = value == "true" || value == "1"
+	case "ai.training.epochs":
+		// Parse int value
+		var epochs int
+		if _, err := fmt.Sscanf(value, "%d", &epochs); err == nil {
+			cfg.AI.Training.Epochs = epochs
+		}
+	case "ai.training.learning_rate":
+		// Parse float value
+		var lr float64
+		if _, err := fmt.Sscanf(value, "%f", &lr); err == nil {
+			cfg.AI.Training.LearningRate = lr
+		}
+	case "ai.training.batch_size":
+		// Parse int value
+		var bs int
+		if _, err := fmt.Sscanf(value, "%d", &bs); err == nil {
+			cfg.AI.Training.BatchSize = bs
+		}
+	case "ai.inference.max_suggestions":
+		// Parse int value
+		var ms int
+		if _, err := fmt.Sscanf(value, "%d", &ms); err == nil {
+			cfg.AI.Inference.MaxSuggestions = ms
+		}
+	case "ai.inference.confidence_threshold":
+		// Parse float value
+		var ct float64
+		if _, err := fmt.Sscanf(value, "%f", &ct); err == nil {
+			cfg.AI.Inference.ConfidenceThreshold = ct
+		}
+	case "ui.theme":
+		cfg.UI.Theme = value
+	case "ui.show_confidence":
+		cfg.UI.ShowConfidence = value == "true" || value == "1"
+	case "ui.show_explanations":
+		cfg.UI.ShowExplanations = value == "true" || value == "1"
+	case "database.path":
+		cfg.Database.Path = value
+	case "history.enabled":
+		cfg.History.Enabled = value == "true" || value == "1"
+	case "history.max_entries":
+		// Parse int value
+		var me int
+		if _, err := fmt.Sscanf(value, "%d", &me); err == nil {
+			cfg.History.MaxEntries = me
+		}
+	case "fuzzy.enabled":
+		cfg.Fuzzy.Enabled = value == "true" || value == "1"
+	case "fuzzy.threshold":
+		// Parse float value
+		var th float64
+		if _, err := fmt.Sscanf(value, "%f", &th); err == nil {
+			cfg.Fuzzy.Threshold = th
+		}
+	case "context.enabled":
+		cfg.Context.Enabled = value == "true" || value == "1"
+	case "logging.level":
+		cfg.Logging.Level = value
+	case "app.debug":
+		cfg.App.Debug = value == "true" || value == "1"
+	default:
+		return fmt.Errorf("unknown config key: %s", key)
+	}
+	
+	// Save the updated config
+	return config.Save()
 }
 
 func resetConfig() error {

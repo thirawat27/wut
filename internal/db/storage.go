@@ -63,7 +63,7 @@ type CategoryStat struct {
 // NewStorage creates a new storage instance
 func NewStorage(path string) (*Storage, error) {
 	// Expand path
-	if path[:2] == "~/." || path[:2] == "~\\" {
+	if len(path) >= 2 && (path[:2] == "~/." || path[:2] == "~\\") {
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, err

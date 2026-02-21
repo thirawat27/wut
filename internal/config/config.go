@@ -22,6 +22,7 @@ type Config struct {
 	Shell     ShellConfig     `mapstructure:"shell"`
 	Privacy   PrivacyConfig   `mapstructure:"privacy"`
 	Logging   LoggingConfig   `mapstructure:"logging"`
+	TLDR      TLDRConfig      `mapstructure:"tldr"`
 }
 
 // AppConfig holds application settings
@@ -144,6 +145,17 @@ type LoggingConfig struct {
 	MaxAge     int    `mapstructure:"max_age"`
 }
 
+// TLDRConfig holds TLDR pages settings
+type TLDRConfig struct {
+	Enabled         bool   `mapstructure:"enabled"`
+	AutoSync        bool   `mapstructure:"auto_sync"`
+	AutoSyncInterval int   `mapstructure:"auto_sync_interval"` // days
+	OfflineMode     bool   `mapstructure:"offline_mode"`
+	AutoDetectOnline bool  `mapstructure:"auto_detect_online"`
+	MaxCacheAge     int    `mapstructure:"max_cache_age"`      // days
+	DefaultPlatform string `mapstructure:"default_platform"`
+}
+
 var (
 	// globalConfig holds the global configuration instance
 	globalConfig *Config
@@ -240,6 +252,7 @@ func Save() error {
 	viper.Set("shell", globalConfig.Shell)
 	viper.Set("privacy", globalConfig.Privacy)
 	viper.Set("logging", globalConfig.Logging)
+	viper.Set("tldr", globalConfig.TLDR)
 
 	// Write to file
 	if err := viper.WriteConfig(); err != nil {
@@ -282,6 +295,15 @@ func setDefaults() {
 
 	viper.SetDefault("history.enabled", true)
 	viper.SetDefault("history.max_entries", 10000)
+
+	// TLDR defaults
+	viper.SetDefault("tldr.enabled", true)
+	viper.SetDefault("tldr.auto_sync", true)
+	viper.SetDefault("tldr.auto_sync_interval", 7) // 7 days
+	viper.SetDefault("tldr.offline_mode", false)
+	viper.SetDefault("tldr.auto_detect_online", true)
+	viper.SetDefault("tldr.max_cache_age", 30) // 30 days
+	viper.SetDefault("tldr.default_platform", "common")
 }
 
 // createDefaultConfig creates a default configuration file
