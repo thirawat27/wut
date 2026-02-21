@@ -1,733 +1,280 @@
 #!/bin/bash
-# WUT Installation Script for Unix-like systems
-# Supports: Linux, macOS, FreeBSD, OpenBSD, NetBSD
-# Shells: bash, zsh, fish, nushell, elvish, xonsh, tcsh, ksh
-#
-# Usage:
-#   curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
-#   
-#   # With options:
-#   curl -fsSL ... | bash -s -- --version v1.0.0 --no-init
-
+# WUT - Command Helper | Unix Installer
+# Usage:  curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
 set -e
 
-# Colors (fallback for terminals without color support)
-if [ -t 1 ]; then
-    RED='\033[0;31m'
-    GREEN='\033[0;32m'
-    YELLOW='\033[1;33m'
-    BLUE='\033[0;34m'
-    CYAN='\033[0;36m'
-    BOLD='\033[1m'
-    NC='\033[0m'
-else
-    RED='' GREEN='' YELLOW='' BLUE='' CYAN='' BOLD='' NC=''
-fi
-
-# Configuration
-REPO_URL="https://github.com/thirawat27/wut"
-API_URL="https://api.github.com/repos/thirawat27/wut"
+# --- config ---
+REPO="thirawat27/wut"
+API="https://api.github.com/repos/$REPO"
+BASE="https://github.com/$REPO"
 VERSION="${VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-CONFIG_DIR="${CONFIG_DIR:-$HOME/.config/wut}"
-DATA_DIR="${DATA_DIR:-$HOME/.wut}"
-TEMP_DIR="${TEMP_DIR:-$(mktemp -d)}"
+TMP="$(mktemp -d)"
 
-# Flags
-NO_SHELL_INTEGRATION=0
-RUN_INIT=1
+NO_INIT=0
+NO_SHELL=0
 FORCE=0
-VERBOSE=0
 
-# Cleanup on exit
-cleanup() {
-    if [ -d "$TEMP_DIR" ] && [[ "$TEMP_DIR" == /tmp/* || "$TEMP_DIR" == /var/tmp/* ]]; then
-        rm -rf "$TEMP_DIR"
+trap 'rm -rf "$TMP"' EXIT
+
+# --- colors ---
+if [ -t 1 ]; then
+    R='\033[0;31m' G='\033[0;32m' Y='\033[1;33m' C='\033[0;36m' B='\033[1m' N='\033[0m'
+else
+    R='' G='' Y='' C='' B='' N=''
+fi
+
+ok()   { echo -e "${G}[OK]${N} $1"; }
+err()  { echo -e "${R}[ERR]${N} $1"; }
+info() { echo -e "${C}[>]${N} $1"; }
+warn() { echo -e "${Y}[!]${N} $1"; }
+
+banner() {
+    echo ""
+    echo -e "${C}${B}  WUT - Command Helper  |  Unix Installer${N}"
+    echo ""
+}
+
+has() { command -v "$1" >/dev/null 2>&1; }
+
+# --- download helper ---
+dl() {
+    local url="$1" out="$2"
+    if has curl; then
+        curl -fsSL "$url" -o "$out" 2>/dev/null
+    elif has wget; then
+        wget -qO "$out" "$url" 2>/dev/null
+    else
+        err "Need curl or wget"; exit 1
     fi
 }
-trap cleanup EXIT
 
-# Detect OS and Architecture
+# --- detect platform ---
 detect_platform() {
-    OS=$(uname -s | tr '[:upper:]' '[:lower:]')
-    ARCH=$(uname -m)
-    
-    case "$OS" in
-        linux*)     OS="Linux" ;;
-        darwin*)    OS="Darwin" ;;
-        freebsd*)   OS="FreeBSD" ;;
-        openbsd*)   OS="OpenBSD" ;;
-        netbsd*)    OS="NetBSD" ;;
-        msys*|cygwin*|mingw*)
-                    OS="Windows" ;;
-        *)          OS="unknown" ;;
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+
+    case "$os" in
+        Linux*)   os="Linux" ;;
+        Darwin*)  os="Darwin" ;;
+        FreeBSD*) os="FreeBSD" ;;
+        OpenBSD*) os="OpenBSD" ;;
+        NetBSD*)  os="NetBSD" ;;
+        MSYS*|CYGWIN*|MINGW*) os="Windows" ;;
+        *) err "Unsupported OS: $os"; exit 1 ;;
     esac
-    
-    case "$ARCH" in
-        x86_64|amd64)   ARCH="x86_64" ;;
-        i386|i686)      ARCH="i386" ;;
-        arm64|aarch64)  ARCH="arm64" ;;
-        armv7l|armv7)   ARCH="arm" ;;
-        riscv64)        ARCH="riscv64" ;;
-        *)              ARCH="unknown" ;;
+
+    case "$arch" in
+        x86_64|amd64)  arch="x86_64" ;;
+        i386|i686)     arch="i386" ;;
+        arm64|aarch64) arch="arm64" ;;
+        armv7l|armv7)  arch="arm" ;;
+        riscv64)       arch="riscv64" ;;
+        *) err "Unsupported arch: $arch"; exit 1 ;;
     esac
-    
-    PLATFORM="${OS}_${ARCH}"
+
+    OS="$os"
+    ARCH="$arch"
+    PLATFORM="${os}_${arch}"
 }
 
-# Print functions
-print_header() {
-    echo -e "${BLUE}${BOLD}"
-    echo "╔════════════════════════════════════════════════════════════╗"
-    echo "║                                                            ║"
-    echo "║   WUT - Command Helper                                     ║"
-    echo "║   Universal Installation Script                            ║"
-    echo "║                                                            ║"
-    echo "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
+# --- resolve version ---
+resolve_version() {
+    if [ "$VERSION" != "latest" ]; then return; fi
+    local v=""
+    if has curl; then
+        v="$(curl -fsSL "$API/releases/latest" 2>/dev/null | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)"
+    elif has wget; then
+        v="$(wget -qO- "$API/releases/latest" 2>/dev/null | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)"
+    fi
+    if [ -z "$v" ]; then err "Cannot fetch latest version"; exit 1; fi
+    VERSION="$v"
 }
 
-print_success() { echo -e "${GREEN}✓${NC} $1"; }
-print_error() { echo -e "${RED}✗${NC} $1"; }
-print_info() { echo -e "${BLUE}ℹ${NC} $1"; }
-print_warning() { echo -e "${YELLOW}⚠${NC} $1"; }
-print_step() { echo -e "${CYAN}→${NC} $1"; }
-print_verbose() {
-    if [ $VERBOSE -eq 1 ]; then
-        echo -e "${CYAN}[verbose]${NC} $1"
-    fi
-}
+# --- add to PATH ---
+add_to_path() {
+    # current session
+    case ":$PATH:" in
+        *":$INSTALL_DIR:"*) ;;
+        *) export PATH="$PATH:$INSTALL_DIR" ;;
+    esac
 
-# Check if command exists
-command_exists() {
-    command -v "$1" >/dev/null 2>&1
-}
-
-# Check dependencies
-check_dependencies() {
-    print_step "Checking dependencies..."
-    
-    local missing=()
-    
-    if ! command_exists curl && ! command_exists wget; then
-        missing+=("curl or wget")
-    fi
-    
-    if ! command_exists uname; then
-        missing+=("uname")
-    fi
-    
-    # Check for tar (needed for extracting archives)
-    if ! command_exists tar; then
-        missing+=("tar")
-    fi
-    
-    if [ ${#missing[@]} -ne 0 ]; then
-        print_error "Missing required tools: ${missing[*]}"
-        exit 1
-    fi
-    
-    print_success "All dependencies satisfied"
-}
-
-# Create directories
-create_directories() {
-    print_step "Creating directories..."
-    
-    mkdir -p "$INSTALL_DIR"
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$DATA_DIR"/{data,models,logs}
-    
-    print_success "Directories created"
-}
-
-# Get latest version from GitHub API
-get_latest_version() {
-    local version
-    
-    if command_exists curl; then
-        version=$(curl -fsSL "${API_URL}/releases/latest" 2>/dev/null | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)
-    else
-        version=$(wget -qO- "${API_URL}/releases/latest" 2>/dev/null | grep -o '"tag_name": "[^"]*"' | cut -d'"' -f4)
-    fi
-    
-    echo "${version:-latest}"
-}
-
-# Download file with progress
-download_file() {
-    local url="$1"
-    local output="$2"
-    
-    print_verbose "Downloading: $url"
-    
-    if command_exists curl; then
-        if [ $VERBOSE -eq 1 ]; then
-            curl -fsSL --progress-bar "$url" -o "$output"
-        else
-            curl -fsSL "$url" -o "$output" 2>/dev/null
-        fi
-    else
-        if [ $VERBOSE -eq 1 ]; then
-            wget --show-progress -q "$url" -O "$output"
-        else
-            wget -q "$url" -O "$output" 2>/dev/null
-        fi
-    fi
-}
-
-# Verify checksum
-verify_checksum() {
-    local file="$1"
-    local checksum_file="$2"
-    
-    if [ ! -f "$checksum_file" ]; then
-        print_warning "Checksum file not found, skipping verification"
-        return 0
-    fi
-    
-    print_step "Verifying checksum..."
-    
-    local expected_checksum
-    expected_checksum=$(grep "$(basename "$file")" "$checksum_file" 2>/dev/null | awk '{print $1}')
-    
-    if [ -z "$expected_checksum" ]; then
-        print_warning "Checksum for $(basename "$file") not found in checksums file"
-        return 0
-    fi
-    
-    local actual_checksum
-    if command_exists sha256sum; then
-        actual_checksum=$(sha256sum "$file" | awk '{print $1}')
-    elif command_exists shasum; then
-        actual_checksum=$(shasum -a 256 "$file" | awk '{print $1}')
-    else
-        print_warning "Neither sha256sum nor shasum found, skipping verification"
-        return 0
-    fi
-    
-    if [ "$expected_checksum" != "$actual_checksum" ]; then
-        print_error "Checksum verification failed!"
-        print_error "Expected: $expected_checksum"
-        print_error "Actual:   $actual_checksum"
-        return 1
-    fi
-    
-    print_success "Checksum verified"
-    return 0
-}
-
-# Download and install binary
-download_and_install() {
-    if [ "$VERSION" = "latest" ]; then
-        VERSION=$(get_latest_version)
-        print_info "Latest version: $VERSION"
-    fi
-    
-    # Remove 'v' prefix if present for URL construction
-    local version_no_v="${VERSION#v}"
-    
-    local archive_name="wut_${version_no_v}_${PLATFORM}.tar.gz"
-    local checksum_name="checksums.txt"
-    
-    local download_url="${REPO_URL}/releases/download/${VERSION}/${archive_name}"
-    local checksum_url="${REPO_URL}/releases/download/${VERSION}/${checksum_name}"
-    
-    print_step "Downloading WUT ${VERSION} for ${PLATFORM}..."
-    print_verbose "Archive: $archive_name"
-    print_verbose "URL: $download_url"
-    
-    local archive_path="${TEMP_DIR}/${archive_name}"
-    local checksum_path="${TEMP_DIR}/${checksum_name}"
-    
-    # Download archive
-    if ! download_file "$download_url" "$archive_path"; then
-        print_error "Failed to download archive"
-        return 1
-    fi
-    
-    print_verbose "Downloaded to: $archive_path"
-    
-    # Try to download checksums (optional)
-    download_file "$checksum_url" "$checksum_path" 2>/dev/null || true
-    
-    # Verify checksum if available
-    if [ -f "$checksum_path" ]; then
-        verify_checksum "$archive_path" "$checksum_path" || return 1
-    fi
-    
-    # Extract archive
-    print_step "Extracting archive..."
-    if ! tar -xzf "$archive_path" -C "$TEMP_DIR"; then
-        print_error "Failed to extract archive"
-        return 1
-    fi
-    
-    # Find the binary
-    local binary_name="wut"
-    if [ "$OS" = "Windows" ]; then
-        binary_name="wut.exe"
-    fi
-    
-    local extracted_binary="${TEMP_DIR}/${binary_name}"
-    if [ ! -f "$extracted_binary" ]; then
-        # Try to find in subdirectory
-        extracted_binary=$(find "$TEMP_DIR" -name "$binary_name" -type f 2>/dev/null | head -1)
-        if [ -z "$extracted_binary" ]; then
-            print_error "Binary not found in archive"
-            return 1
-        fi
-    fi
-    
-    print_verbose "Found binary: $extracted_binary"
-    
-    # Install binary
-    local output_path="${INSTALL_DIR}/wut"
-    if [ "$OS" = "Windows" ]; then
-        output_path="${INSTALL_DIR}/wut.exe"
-    fi
-    
-    # Backup existing binary if exists
-    if [ -f "$output_path" ] && [ $FORCE -eq 0 ]; then
-        print_warning "WUT is already installed. Use --force to overwrite."
-        
-        read -p "Continue with installation? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Installation cancelled"
-            exit 0
-        fi
-    fi
-    
-    if [ -f "$output_path" ]; then
-        mv "$output_path" "${output_path}.backup"
-        print_verbose "Backed up existing binary"
-    fi
-    
-    # Copy and make executable
-    cp "$extracted_binary" "$output_path"
-    chmod +x "$output_path"
-    
-    print_success "Binary installed: ${output_path}"
-}
-
-# Build from source
-build_from_source() {
-    print_warning "Binary download failed, attempting to build from source..."
-    
-    if ! command_exists go; then
-        print_error "Go is required to build from source"
-        print_info "Please install Go from https://golang.org/dl/"
-        exit 1
-    fi
-    
-    # Check Go version (requires 1.21+)
-    local go_version
-    go_version=$(go version | grep -o 'go[0-9.]*' | head -1)
-    print_info "Found Go: $go_version"
-    
-    print_step "Building from source..."
-    
-    local temp_dir
-    temp_dir=$(mktemp -d)
-    trap "rm -rf '$temp_dir'" EXIT
-    
-    cd "$temp_dir"
-    
-    if command_exists git; then
-        git clone --depth 1 "$REPO_URL" wut 2>/dev/null
-    else
-        # Fallback: download tarball
-        local tarball_url="${REPO_URL}/archive/refs/heads/main.tar.gz"
-        if command_exists curl; then
-            curl -fsSL "$tarball_url" | tar -xz
-        else
-            wget -qO- "$tarball_url" | tar -xz
-        fi
-        mv wut-main wut
-    fi
-    
-    cd wut
-    
-    # Build with optimizations
-    local output_path="${INSTALL_DIR}/wut"
-    if [ "$OS" = "Windows" ]; then
-        output_path="${output_path}.exe"
-    fi
-    
-    CGO_ENABLED=0 go build -ldflags="-s -w" -o "$output_path" .
-    
-    print_success "Built from source: $output_path"
-    
-    cd - >/dev/null
-}
-
-# Detect shell configuration file
-detect_shell_config() {
+    # permanent
+    local rc=""
     local shell_name="${SHELL##*/}"
-    
     case "$shell_name" in
-        bash)
-            if [ -f "$HOME/.bashrc" ]; then
-                echo "$HOME/.bashrc"
-            elif [ -f "$HOME/.bash_profile" ]; then
-                echo "$HOME/.bash_profile"
-            else
-                echo "$HOME/.bashrc"
-            fi
-            ;;
-        zsh)
-            if [ -f "$HOME/.zshrc" ]; then
-                echo "$HOME/.zshrc"
-            elif [ -f "$HOME/.zprofile" ]; then
-                echo "$HOME/.zprofile"
-            else
-                echo "$HOME/.zshrc"
-            fi
-            ;;
-        fish)
-            echo "$HOME/.config/fish/config.fish"
-            ;;
-        nu|nush)
-            echo "$HOME/.config/nushell/config.nu"
-            ;;
-        elvish)
-            echo "$HOME/.elvish/rc.elv"
-            ;;
-        xonsh)
-            echo "$HOME/.xonshrc"
-            ;;
-        tcsh|csh)
-            if [ -f "$HOME/.tcshrc" ]; then
-                echo "$HOME/.tcshrc"
-            elif [ -f "$HOME/.cshrc" ]; then
-                echo "$HOME/.cshrc"
-            else
-                echo "$HOME/.tcshrc"
-            fi
-            ;;
-        ksh|mksh|oksh)
-            echo "$HOME/.kshrc"
-            ;;
-        *)
-            echo "$HOME/.profile"
-            ;;
+        bash) rc="$HOME/.bashrc"; [ ! -f "$rc" ] && rc="$HOME/.bash_profile" ;;
+        zsh)  rc="$HOME/.zshrc" ;;
+        fish) rc="$HOME/.config/fish/config.fish" ;;
+        *)    rc="$HOME/.profile" ;;
+    esac
+
+    if [ -n "$rc" ]; then
+        if [ -f "$rc" ] && grep -q "# WUT PATH" "$rc" 2>/dev/null; then
+            return
+        fi
+        mkdir -p "$(dirname "$rc")"
+        echo '' >> "$rc"
+        echo '# WUT PATH' >> "$rc"
+        if [ "$shell_name" = "fish" ]; then
+            echo "fish_add_path $INSTALL_DIR" >> "$rc"
+        else
+            echo "export PATH=\"\$PATH:$INSTALL_DIR\"" >> "$rc"
+        fi
+        ok "Added to PATH in $rc"
+    fi
+}
+
+# --- build from source ---
+build_from_source() {
+    if ! has go; then
+        err "Go is required to build from source (https://golang.org/dl/)"
+        return 1
+    fi
+    info "Building from source..."
+    local srcdir="$TMP/src"
+    if has git; then
+        git clone --depth 1 "$BASE.git" "$srcdir" 2>/dev/null
+    else
+        dl "$BASE/archive/refs/heads/main.tar.gz" "$TMP/src.tar.gz"
+        tar -xzf "$TMP/src.tar.gz" -C "$TMP"
+        mv "$TMP/wut-main" "$srcdir"
+    fi
+    local out="$INSTALL_DIR/wut"
+    (cd "$srcdir" && CGO_ENABLED=0 go build -ldflags="-s -w" -o "$out" .)
+    chmod +x "$out"
+    ok "Built from source"
+}
+
+# --- main ---
+main() {
+    banner
+    detect_platform
+    info "Platform: $PLATFORM"
+
+    # deps check
+    if ! has curl && ! has wget; then err "Need curl or wget"; exit 1; fi
+    if ! has tar; then err "Need tar"; exit 1; fi
+
+    resolve_version
+    info "Version:  $VERSION"
+
+    # create dirs
+    mkdir -p "$INSTALL_DIR" "$HOME/.config/wut" "$HOME/.wut/data" "$HOME/.wut/logs"
+
+    local dest="$INSTALL_DIR/wut"
+    [ "$OS" = "Windows" ] && dest="$INSTALL_DIR/wut.exe"
+
+    # check existing
+    if [ -f "$dest" ] && [ $FORCE -eq 0 ]; then
+        local ev
+        ev="$("$dest" --version 2>/dev/null | head -1)" || ev="unknown"
+        warn "Already installed: $ev  (use --force to overwrite)"
+    fi
+
+    # download
+    local vn="${VERSION#v}"
+    local ext="tar.gz"
+    [ "$OS" = "Windows" ] && ext="zip"
+    local archive="wut_${vn}_${PLATFORM}.${ext}"
+    local url="$BASE/releases/download/$VERSION/$archive"
+    local dl_path="$TMP/$archive"
+
+    info "Downloading $archive ..."
+    if dl "$url" "$dl_path"; then
+        info "Extracting..."
+        if [ "$ext" = "zip" ]; then
+            unzip -qo "$dl_path" -d "$TMP"
+        else
+            tar -xzf "$dl_path" -C "$TMP"
+        fi
+
+        local bin="$TMP/wut"
+        [ "$OS" = "Windows" ] && bin="$TMP/wut.exe"
+        if [ ! -f "$bin" ]; then
+            bin="$(find "$TMP" -name "wut" -o -name "wut.exe" 2>/dev/null | head -1)"
+        fi
+
+        if [ -z "$bin" ] || [ ! -f "$bin" ]; then
+            err "Binary not found in archive"
+            exit 1
+        fi
+
+        [ -f "$dest" ] && mv "$dest" "${dest}.bak" 2>/dev/null || true
+        cp "$bin" "$dest"
+        chmod +x "$dest"
+        ok "Installed: $dest"
+    else
+        warn "Download failed, trying build from source..."
+        build_from_source || { err "Installation failed"; exit 1; }
+    fi
+
+    # PATH
+    add_to_path
+
+    # verify
+    local v
+    v="$("$dest" --version 2>/dev/null | head -1)" || v="installed"
+    ok "Verified: $v"
+
+    # shell integration
+    if [ $NO_SHELL -eq 0 ] && [ -x "$dest" ]; then
+        info "Setting up shell integration..."
+        "$dest" install --all 2>/dev/null && ok "Shell integration done" || warn "Shell integration skipped"
+    fi
+
+    # auto init
+    if [ $NO_INIT -eq 0 ] && [ -x "$dest" ]; then
+        info "Initializing..."
+        "$dest" init --quick 2>/dev/null && ok "Initialization complete" || warn "Init skipped (run 'wut init' manually)"
+    fi
+
+    # done
+    echo ""
+    echo -e "${G}${B}  WUT is ready!${N}"
+    echo ""
+    echo "  Quick start:"
+    echo "    wut suggest 'git push'     # Get suggestions"
+    echo "    wut explain 'git rebase'   # Explain a command"
+    echo "    wut fix 'gti status'       # Fix typos"
+    echo "    wut --help                 # All commands"
+    echo ""
+
+    if ! has wut; then
+        warn "Restart your terminal or run:  source $(detect_shell_config)"
+    fi
+}
+
+detect_shell_config() {
+    local s="${SHELL##*/}"
+    case "$s" in
+        bash) [ -f "$HOME/.bashrc" ] && echo "$HOME/.bashrc" || echo "$HOME/.bash_profile" ;;
+        zsh)  echo "$HOME/.zshrc" ;;
+        fish) echo "$HOME/.config/fish/config.fish" ;;
+        *)    echo "$HOME/.profile" ;;
     esac
 }
 
-# Add to PATH for current session
-add_to_path_current_session() {
-    if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
-        export PATH="$PATH:$INSTALL_DIR"
-        print_verbose "Added $INSTALL_DIR to current session PATH"
-    fi
-}
-
-# Add to PATH permanently
-add_to_path_permanent() {
-    print_step "Checking PATH..."
-    
-    if [[ ":$PATH:" == *":${INSTALL_DIR}:"* ]]; then
-        print_success "Already in PATH"
-        return 0
-    fi
-    
-    local config_file
-    config_file=$(detect_shell_config)
-    
-    # Create directory if it doesn't exist
-    local config_dir
-    config_dir=$(dirname "$config_file")
-    if [ ! -d "$config_dir" ]; then
-        mkdir -p "$config_dir"
-    fi
-    
-    # Check if already added
-    if [ -f "$config_file" ] && grep -q "WUT PATH" "$config_file" 2>/dev/null; then
-        print_success "PATH entry already exists in $config_file"
-        return 0
-    fi
-    
-    # Add to PATH
-    echo "" >> "$config_file"
-    echo "# WUT PATH" >> "$config_file"
-    echo 'export PATH="$PATH:'"$INSTALL_DIR"'"' >> "$config_file"
-    
-    print_success "Added to PATH in $config_file"
-}
-
-# Install shell integration
-install_shell_integration() {
-    if [ $NO_SHELL_INTEGRATION -eq 1 ]; then
-        print_verbose "Skipping shell integration (--no-shell-integration)"
-        return 0
-    fi
-    
-    print_step "Installing shell integration..."
-    
-    local wut_path="${INSTALL_DIR}/wut"
-    if [ "$OS" = "Windows" ]; then
-        wut_path="${INSTALL_DIR}/wut.exe"
-    fi
-    
-    if [ -x "$wut_path" ]; then
-        if "$wut_path" install --all 2>/dev/null; then
-            print_success "Shell integration installed"
-        else
-            print_warning "Shell integration may need manual configuration"
-            print_info "Run: wut install --all"
-        fi
-    else
-        print_warning "WUT binary not found, skipping shell integration"
-    fi
-}
-
-# Run wut init
-run_init() {
-    if [ $RUN_INIT -eq 0 ]; then
-        print_verbose "Skipping initialization (--no-init)"
-        return 0
-    fi
-    
-    print_step "Running initialization..."
-    
-    local wut_path="${INSTALL_DIR}/wut"
-    if [ "$OS" = "Windows" ]; then
-        wut_path="${INSTALL_DIR}/wut.exe"
-    fi
-    
-    if [ -x "$wut_path" ]; then
-        if "$wut_path" init --quick 2>/dev/null; then
-            print_success "Initialization complete"
-        else
-            print_warning "Initialization failed or not available"
-            print_info "Run manually: wut init"
-        fi
-    fi
-}
-
-# Check if wut is accessible
-check_wut_accessible() {
-    if command_exists wut; then
-        return 0
-    fi
-    return 1
-}
-
-# Try to create symlink for immediate access
-try_create_symlink() {
-    # Try to create symlink in a common PATH location
-    local common_locations=(
-        "/usr/local/bin"
-        "/usr/bin"
-        "$HOME/.local/bin"
-    )
-    
-    for loc in "${common_locations[@]}"; do
-        if [ -d "$loc" ] && [[ ":$PATH:" == *":$loc:"* ]]; then
-            if [ -w "$loc" ]; then
-                local link_target="${INSTALL_DIR}/wut"
-                local link_name="${loc}/wut"
-                
-                if [ ! -f "$link_name" ] && [ -f "$link_target" ]; then
-                    ln -sf "$link_target" "$link_name" 2>/dev/null && {
-                        print_verbose "Created symlink: $link_name -> $link_target"
-                        return 0
-                    }
-                fi
-            fi
-        fi
-    done
-    
-    return 1
-}
-
-# Print system information
-print_system_info() {
-    print_info "Platform: $PLATFORM"
-    print_info "Shell: ${SHELL##*/}"
-    print_info "Install directory: $INSTALL_DIR"
-    print_info "Config directory: $CONFIG_DIR"
-}
-
-# Verify installation
-verify_installation() {
-    print_step "Verifying installation..."
-    
-    local wut_path="${INSTALL_DIR}/wut"
-    if [ "$OS" = "Windows" ]; then
-        wut_path="${INSTALL_DIR}/wut.exe"
-    fi
-    
-    if [ -x "$wut_path" ]; then
-        local version
-        version=$("$wut_path" --version 2>/dev/null || echo "unknown")
-        print_success "Installation verified: $version"
-        return 0
-    else
-        print_error "Installation verification failed"
-        return 1
-    fi
-}
-
-# Print usage
-print_usage() {
-    cat << EOF
-Usage: install.sh [OPTIONS]
-
-Options:
-  --version VERSION       Install specific version (default: latest)
-  --install-dir DIR       Install to specific directory (default: ~/.local/bin)
-  --no-shell-integration  Skip shell integration
-  --no-init               Skip automatic initialization (init runs by default)
-  --force                 Force overwrite existing installation
-  --verbose               Enable verbose output
-  --help                  Show this help message
-
-Environment Variables:
-  VERSION                 Version to install (overrides --version)
-  INSTALL_DIR             Installation directory
-  CONFIG_DIR              Configuration directory
-  DATA_DIR                Data directory
-
-Examples:
-  # Install latest version (auto-init, ready to use immediately)
-  ./install.sh
-
-  # Install specific version
-  ./install.sh --version v1.0.0
-
-  # Install without auto-init
-  ./install.sh --no-init
-
-  # Install to custom directory
-  ./install.sh --install-dir /usr/local/bin
-EOF
-}
-
-# Main installation
-main() {
-    print_header
-    
-    detect_platform
-    print_system_info
-    
-    # Check for existing installation
-    local existing_version=""
-    local wut_path="${INSTALL_DIR}/wut"
-    if [ "$OS" = "Windows" ]; then
-        wut_path="${wut_path}.exe"
-    fi
-    
-    if [ -f "$wut_path" ] && [ $FORCE -eq 0 ]; then
-        existing_version=$("$wut_path" --version 2>/dev/null | head -1 || echo "unknown")
-        print_info "Existing installation found: $existing_version"
-        print_info "Use --force to overwrite or install anyway"
-        
-        read -p "Continue with installation? [y/N] " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            print_info "Installation cancelled"
-            exit 0
-        fi
-    fi
-    
-    check_dependencies
-    create_directories
-    
-    # Add to current session PATH immediately
-    add_to_path_current_session
-    
-    # Try to download binary, fallback to building from source
-    if ! download_and_install; then
-        print_warning "Download failed, trying to build from source..."
-        build_from_source
-    fi
-    
-    # Add to permanent PATH
-    add_to_path_permanent
-    
-    # Try to create symlink for immediate access
-    try_create_symlink
-    
-    # Refresh PATH in current session
-    add_to_path_current_session
-    
-    # Verify installation
-    verify_installation
-    
-    # Install shell integration and run init
-    install_shell_integration
-    run_init
-    
-    echo
-    print_header
-    print_success "WUT installation complete!"
-    echo
-    
-    # Check if wut is immediately usable
-    if check_wut_accessible; then
-        print_success "WUT is ready to use!"
-        echo
-        print_info "Quick Start:"
-        echo "  wut suggest 'git push'    # Get command suggestions"
-        echo "  wut history               # View command history"
-        echo "  wut explain 'git rebase'  # Explain a command"
-        echo "  wut --help                # Show all commands"
-    else
-        print_warning "WUT is installed but requires a fresh terminal session to use."
-        echo
-        print_info "Please run one of the following:"
-        echo "  1. Restart your terminal"
-        echo "  2. Or run: source $(detect_shell_config)"
-        echo ""
-        print_info "After that, you can use:"
-        echo "  wut --help"
-    fi
-    
-    echo
-}
-
-# Handle command line arguments
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --version)
-            VERSION="$2"
-            shift 2
-            ;;
-        --install-dir)
-            INSTALL_DIR="$2"
-            shift 2
-            ;;
-        --no-shell-integration)
-            NO_SHELL_INTEGRATION=1
-            shift
-            ;;
-        --no-init)
-            RUN_INIT=0
-            shift
-            ;;
-        --init)
-            RUN_INIT=1
-            shift
-            ;;
-        --force)
-            FORCE=1
-            shift
-            ;;
-        --verbose)
-            VERBOSE=1
-            shift
-            ;;
+# --- args ---
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --version)   VERSION="$2"; shift 2 ;;
+        --install-dir) INSTALL_DIR="$2"; shift 2 ;;
+        --no-init)   NO_INIT=1; shift ;;
+        --no-shell)  NO_SHELL=1; shift ;;
+        --force)     FORCE=1; shift ;;
         --help|-h)
-            print_usage
-            exit 0
-            ;;
-        *)
-            print_error "Unknown option: $1"
-            print_usage
-            exit 1
-            ;;
+            echo "Usage: install.sh [OPTIONS]"
+            echo ""
+            echo "  --version VER     Install specific version (default: latest)"
+            echo "  --install-dir DIR Install directory (default: ~/.local/bin)"
+            echo "  --no-init         Skip auto-initialization"
+            echo "  --no-shell        Skip shell integration"
+            echo "  --force           Force overwrite"
+            echo "  --help            Show this help"
+            exit 0 ;;
+        *) err "Unknown option: $1"; exit 1 ;;
     esac
 done
 
