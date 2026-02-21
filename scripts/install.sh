@@ -41,7 +41,7 @@ VERBOSE=0
 
 # Cleanup on exit
 cleanup() {
-    if [ -d "$TEMP_DIR" ] && [[ "$TEMP_DIR" == /tmp/* ]]; then
+    if [ -d "$TEMP_DIR" ] && [[ "$TEMP_DIR" == /tmp/* || "$TEMP_DIR" == /var/tmp/* ]]; then
         rm -rf "$TEMP_DIR"
     fi
 }
@@ -290,7 +290,13 @@ download_and_install() {
     # Backup existing binary if exists
     if [ -f "$output_path" ] && [ $FORCE -eq 0 ]; then
         print_warning "WUT is already installed. Use --force to overwrite."
-        return 0
+        
+        read -p "Continue with installation? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            print_info "Installation cancelled"
+            exit 0
+        fi
     fi
     
     if [ -f "$output_path" ]; then
@@ -409,8 +415,16 @@ detect_shell_config() {
     esac
 }
 
-# Add to PATH
-add_to_path() {
+# Add to PATH for current session
+add_to_path_current_session() {
+    if [[ ":$PATH:" != *":${INSTALL_DIR}:"* ]]; then
+        export PATH="$PATH:$INSTALL_DIR"
+        print_verbose "Added $INSTALL_DIR to current session PATH"
+    fi
+}
+
+# Add to PATH permanently
+add_to_path_permanent() {
     print_step "Checking PATH..."
     
     if [[ ":$PATH:" == *":${INSTALL_DIR}:"* ]]; then
@@ -440,7 +454,6 @@ add_to_path() {
     echo 'export PATH="$PATH:'"$INSTALL_DIR"'"' >> "$config_file"
     
     print_success "Added to PATH in $config_file"
-    print_info "Please run: source $config_file"
 }
 
 # Install shell integration
@@ -492,6 +505,42 @@ run_init() {
     fi
 }
 
+# Check if wut is accessible
+check_wut_accessible() {
+    if command_exists wut; then
+        return 0
+    fi
+    return 1
+}
+
+# Try to create symlink for immediate access
+try_create_symlink() {
+    # Try to create symlink in a common PATH location
+    local common_locations=(
+        "/usr/local/bin"
+        "/usr/bin"
+        "$HOME/.local/bin"
+    )
+    
+    for loc in "${common_locations[@]}"; do
+        if [ -d "$loc" ] && [[ ":$PATH:" == *":$loc:"* ]]; then
+            if [ -w "$loc" ]; then
+                local link_target="${INSTALL_DIR}/wut"
+                local link_name="${loc}/wut"
+                
+                if [ ! -f "$link_name" ] && [ -f "$link_target" ]; then
+                    ln -sf "$link_target" "$link_name" 2>/dev/null && {
+                        print_verbose "Created symlink: $link_name -> $link_target"
+                        return 0
+                    }
+                fi
+            fi
+        fi
+    done
+    
+    return 1
+}
+
 # Print system information
 print_system_info() {
     print_info "Platform: $PLATFORM"
@@ -513,6 +562,7 @@ verify_installation() {
         local version
         version=$("$wut_path" --version 2>/dev/null || echo "unknown")
         print_success "Installation verified: $version"
+        return 0
     else
         print_error "Installation verification failed"
         return 1
@@ -584,29 +634,56 @@ main() {
     check_dependencies
     create_directories
     
+    # Add to current session PATH immediately
+    add_to_path_current_session
+    
     # Try to download binary, fallback to building from source
     if ! download_and_install; then
         print_warning "Download failed, trying to build from source..."
         build_from_source
     fi
     
-    add_to_path
+    # Add to permanent PATH
+    add_to_path_permanent
+    
+    # Try to create symlink for immediate access
+    try_create_symlink
+    
+    # Refresh PATH in current session
+    add_to_path_current_session
+    
+    # Verify installation
+    verify_installation
+    
+    # Install shell integration and run init
     install_shell_integration
     run_init
-    verify_installation
     
     echo
     print_header
     print_success "WUT installation complete!"
     echo
-    print_info "Quick Start:"
-    echo "  wut suggest 'git push'    # Get command suggestions"
-    echo "  wut history               # View command history"
-    echo "  wut explain 'git rebase'  # Explain a command"
-    echo "  wut --help                # Show all commands"
-    echo
-    print_info "Please restart your terminal or run:"
-    echo "  source $(detect_shell_config)"
+    
+    # Check if wut is immediately usable
+    if check_wut_accessible; then
+        print_success "WUT is ready to use!"
+        echo
+        print_info "Quick Start:"
+        echo "  wut suggest 'git push'    # Get command suggestions"
+        echo "  wut history               # View command history"
+        echo "  wut explain 'git rebase'  # Explain a command"
+        echo "  wut --help                # Show all commands"
+    else
+        print_warning "WUT is installed but requires a fresh terminal session to use."
+        echo
+        print_info "Please run one of the following:"
+        echo "  1. Restart your terminal"
+        echo "  2. Or run: source $(detect_shell_config)"
+        echo ""
+        print_info "After that, you can use:"
+        echo "  wut --help"
+    fi
+    
     echo
 }
 

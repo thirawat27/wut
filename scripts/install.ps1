@@ -26,6 +26,7 @@ $ErrorActionPreference = "Stop"
 $script:RepoUrl = "https://github.com/thirawat27/wut"
 $script:ApiUrl = "https://api.github.com/repos/thirawat27/wut"
 $script:TempDir = Join-Path $env:TEMP ("wut-install-" + [Guid]::NewGuid().ToString().Substring(0, 8))
+$script:WutExecutable = $null
 
 # Color support detection
 $supportsColor = $Host.UI.SupportsVirtualTerminal -or $env:TERM -like "*xterm*"
@@ -45,7 +46,7 @@ function Write-Success($Message) { Write-Color "[OK] " "Green"; Write-Host "$Mes
 function Write-ErrorMsg($Message) { Write-Color "[ERR] " "Red"; Write-Host "$Message" }
 function Write-Info($Message) { Write-Color "[INFO] " "Cyan"; Write-Host "$Message" }
 function Write-Warning($Message) { Write-Color "[WARN] " "Yellow"; Write-Host "$Message" }
-function Write-Step($Message) { Write-Color "[>] " "Blue"; Write-Host "$Message" }
+function Write-Step($Message) { Write-Color ">>> " "Blue"; Write-Host "$Message" }
 function Write-VerboseLog($Message) {
     if ($Verbose) {
         Write-Color "[verbose] " "Gray"; Write-Host "$Message"
@@ -72,6 +73,59 @@ function Cleanup {
 
 # Register cleanup on exit
 trap { Cleanup }
+
+# Refresh environment variables from registry
+function Refresh-Environment {
+    Write-VerboseLog "Refreshing environment variables..."
+    
+    # Refresh PATH from User and Machine environment
+    $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    $machinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
+    $currentPath = $env:PATH
+    
+    # Combine paths, ensuring no duplicates
+    $newPath = ($userPath, $machinePath, $currentPath -split ';' | Select-Object -Unique) -join ';'
+    $env:PATH = $newPath
+    
+    Write-VerboseLog "PATH refreshed"
+}
+
+# Find wut executable in common locations
+function Find-WutExecutable {
+    # Check if already in PATH
+    $inPath = Get-Command wut -ErrorAction SilentlyContinue
+    if ($inPath) {
+        return $inPath.Source
+    }
+    
+    # Common installation paths
+    $possiblePaths = @(
+        (Join-Path $InstallDir "wut.exe")
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\thirawat27.wut\wut.exe")
+        (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\wut.exe")
+        "C:\Program Files\WUT\wut.exe"
+        "C:\Program Files (x86)\WUT\wut.exe"
+        (Join-Path $env:USERPROFILE "scoop\shims\wut.exe")
+        (Join-Path $env:USERPROFILE "scoop\apps\wut\current\wut.exe")
+    )
+    
+    foreach ($path in $possiblePaths) {
+        if (Test-Path $path) {
+            return $path
+        }
+    }
+    
+    # Search in PATH directories
+    $pathDirs = $env:PATH -split ';'
+    foreach ($dir in $pathDirs) {
+        $wutPath = Join-Path $dir "wut.exe"
+        if (Test-Path $wutPath) {
+            return $wutPath
+        }
+    }
+    
+    return $null
+}
 
 # Detect Windows version and architecture
 function Get-Platform {
@@ -279,6 +333,10 @@ function Download-AndInstall($Platform) {
     Copy-Item -Path $extractedBinary -Destination $outputPath -Force
     
     Write-Success "Binary installed: $outputPath"
+    
+    # Store the executable path for later use
+    $script:WutExecutable = $outputPath
+    
     return $true
 }
 
@@ -322,6 +380,9 @@ function Build-FromSource {
         go build -ldflags="-s -w" -o $outputPath .
         
         Write-Success "Built from source: $outputPath"
+        
+        # Store the executable path
+        $script:WutExecutable = $outputPath
     } finally {
         Pop-Location
         Remove-Item -Path $buildDir -Recurse -Force -ErrorAction SilentlyContinue
@@ -343,7 +404,7 @@ function Add-ToPath {
     $newPath = "$currentPath;$InstallDir"
     [Environment]::SetEnvironmentVariable("PATH", $newPath, "User")
     
-    # Update current session
+    # Update current session immediately
     $env:PATH = "$env:PATH;$InstallDir"
     
     Write-Success "Added to PATH"
@@ -379,12 +440,15 @@ function Install-ShellIntegration($Platform) {
     
     Write-Step "Installing shell integration..."
     
-    $wutPath = Join-Path $InstallDir "wut.exe"
+    # Find wut executable
+    $wutPath = if ($script:WutExecutable) { $script:WutExecutable } else { Find-WutExecutable }
     
-    if (!(Test-Path $wutPath)) {
+    if (-not $wutPath -or !(Test-Path $wutPath)) {
         Write-Warning "WUT binary not found, skipping shell integration"
         return
     }
+    
+    Write-VerboseLog "Using wut at: $wutPath"
     
     try {
         if ($Platform.IsWindowsTerminal) {
@@ -417,16 +481,20 @@ function Run-Init {
     
     Write-Step "Running initialization..."
     
-    $wutPath = Join-Path $InstallDir "wut.exe"
+    # Find wut executable
+    $wutPath = if ($script:WutExecutable) { $script:WutExecutable } else { Find-WutExecutable }
     
-    if (Test-Path $wutPath) {
-        try {
-            & $wutPath init --quick 2>&1 | Out-Null
-            Write-Success "Initialization complete"
-        } catch {
-            Write-Warning "Initialization failed or not available"
-            Write-Info "Run manually: wut init"
-        }
+    if (-not $wutPath -or !(Test-Path $wutPath)) {
+        Write-Warning "WUT binary not found, skipping initialization"
+        return
+    }
+    
+    try {
+        & $wutPath init --quick 2>&1 | Out-Null
+        Write-Success "Initialization complete"
+    } catch {
+        Write-Warning "Initialization failed or not available"
+        Write-Info "Run manually: wut init"
     }
 }
 
@@ -437,6 +505,23 @@ function Install-ViaWinGet {
         try {
             winget install thirawat27.wut --accept-source-agreements --accept-package-agreements
             Write-Success "Installed via WinGet"
+            
+            # Refresh environment to get updated PATH
+            Refresh-Environment
+            
+            # Find the installed executable
+            $installedPath = Find-WutExecutable
+            if ($installedPath) {
+                Write-VerboseLog "Found wut at: $installedPath"
+                $script:WutExecutable = $installedPath
+                
+                # Ensure the directory is in current session PATH
+                $wutDir = Split-Path $installedPath -Parent
+                if ($env:PATH -notlike "*$wutDir*") {
+                    $env:PATH = "$env:PATH;$wutDir"
+                }
+            }
+            
             return $true
         } catch {
             Write-Info "WinGet installation failed, falling back to direct download"
@@ -453,6 +538,16 @@ function Install-ViaScoop {
         try {
             scoop install wut
             Write-Success "Installed via Scoop"
+            
+            # Refresh environment
+            Refresh-Environment
+            
+            # Find the installed executable
+            $installedPath = Find-WutExecutable
+            if ($installedPath) {
+                $script:WutExecutable = $installedPath
+            }
+            
             return $true
         } catch {
             Write-Info "Scoop installation failed, falling back to direct download"
@@ -462,22 +557,38 @@ function Install-ViaScoop {
     return $false
 }
 
-# Verify installation
+# Verify installation and make sure wut is usable
 function Verify-Installation {
     Write-Step "Verifying installation..."
     
-    $wutPath = Join-Path $InstallDir "wut.exe"
+    # Try to find wut
+    $wutPath = Find-WutExecutable
     
-    if (Test-Path $wutPath) {
+    if ($wutPath) {
+        Write-VerboseLog "Found wut at: $wutPath"
+        $script:WutExecutable = $wutPath
+        
         try {
             $ver = & $wutPath --version 2>&1 | Select-Object -First 1
             Write-Success "Installation verified: $ver"
+            return $true
         } catch {
             Write-Warning "Installation verification had issues"
         }
     } else {
         Write-ErrorMsg "Installation verification failed - binary not found"
     }
+    
+    return $false
+}
+
+# Test if wut is accessible in current session
+function Test-WutAccessible {
+    $wutCmd = Get-Command wut -ErrorAction SilentlyContinue
+    if ($wutCmd) {
+        return $wutCmd.Source
+    }
+    return $null
 }
 
 # Print system information
@@ -532,10 +643,10 @@ function Install-WUT {
     Print-SystemInfo $platform
     
     # Check for existing installation
-    $wutPath = Join-Path $InstallDir "wut.exe"
-    if ((Test-Path $wutPath) -and !$Force) {
+    $existingWut = Find-WutExecutable
+    if ($existingWut -and !$Force) {
         try {
-            $existingVersion = & $wutPath --version 2>$null | Select-Object -First 1
+            $existingVersion = & $existingWut --version 2>$null | Select-Object -First 1
             Write-Info "Existing installation found: $existingVersion"
             Write-Info "Use -Force to overwrite"
             
@@ -574,22 +685,45 @@ function Install-WUT {
         }
         
         Add-ToPath
+    }
+    
+    # Refresh environment to ensure PATH is up to date
+    Refresh-Environment
+    
+    # Verify installation
+    $verified = Verify-Installation
+    
+    # Install shell integration and init if verified
+    if ($verified) {
         Install-ShellIntegration $platform
         Run-Init
-        Verify-Installation
     }
     
     Write-Header
     Write-Success "WUT installation complete!"
     Write-Host ""
-    Write-Info "Quick Start:"
-    Write-Host "  wut suggest 'git push'    # Get command suggestions"
-    Write-Host "  wut history               # View command history"
-    Write-Host "  wut explain 'git rebase'  # Explain a command"
-    Write-Host "  wut --help                # Show all commands"
-    Write-Host ""
-    Write-Info "Please restart your terminal or run:"
-    Write-Host "  . ``$(Get-ProfilePath)``"
+    
+    # Test if wut is immediately usable
+    $accessiblePath = Test-WutAccessible
+    if ($accessiblePath) {
+        Write-Success "WUT is ready to use!"
+        Write-Host ""
+        Write-Info "Quick Start:"
+        Write-Host "  wut suggest 'git push'    # Get command suggestions"
+        Write-Host "  wut history               # View command history"
+        Write-Host "  wut explain 'git rebase'  # Explain a command"
+        Write-Host "  wut --help                # Show all commands"
+    } else {
+        Write-Warning "WUT is installed but requires a fresh terminal session to use."
+        Write-Host ""
+        Write-Info "Please run one of the following:"
+        Write-Host "  1. Close and reopen your terminal"
+        Write-Host "  2. Or run: . ``$(Get-ProfilePath)``"
+        Write-Host ""
+        Write-Info "After that, you can use:"
+        Write-Host "  wut --help"
+    }
+    
     Write-Host ""
     
     if ($platform.IsWindowsTerminal) {
