@@ -1,7 +1,5 @@
 # WUT - Command Helper
 
-[![CI](https://github.com/thirawat27/wut/actions/workflows/ci.yml/badge.svg)](https://github.com/thirawat27/wut/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/thirawat27/wut)](https://github.com/thirawat27/wut/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.21-blue)](https://golang.org)
 [![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20BSD-blue)](https://github.com/thirawat27/wut/releases)
