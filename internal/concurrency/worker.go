@@ -30,14 +30,14 @@ type Result struct {
 
 // Pool is a worker pool for concurrent task execution
 type Pool struct {
-	workers   int
-	queue     chan Task
-	results   chan Result
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	running   bool
-	mu        sync.RWMutex
+	workers int
+	queue   chan Task
+	results chan Result
+	wg      sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
+	running bool
+	mu      sync.RWMutex
 }
 
 // PoolOption is a functional option for Pool
@@ -62,7 +62,7 @@ func WithQueueSize(n int) PoolOption {
 // NewPool creates a new worker pool
 func NewPool(opts ...PoolOption) *Pool {
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	p := &Pool{
 		workers: runtime.NumCPU(),
 		queue:   make(chan Task, 100),
@@ -70,11 +70,11 @@ func NewPool(opts ...PoolOption) *Pool {
 		ctx:     ctx,
 		cancel:  cancel,
 	}
-	
+
 	for _, opt := range opts {
 		opt(p)
 	}
-	
+
 	return p
 }
 
@@ -82,13 +82,13 @@ func NewPool(opts ...PoolOption) *Pool {
 func (p *Pool) Start() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	
+
 	if p.running {
 		return
 	}
-	
+
 	p.running = true
-	
+
 	// Start workers
 	for i := 0; i < p.workers; i++ {
 		p.wg.Add(1)
@@ -99,18 +99,18 @@ func (p *Pool) Start() {
 // Stop stops the worker pool
 func (p *Pool) Stop() {
 	p.mu.Lock()
-	
+
 	if !p.running {
 		p.mu.Unlock()
 		return
 	}
-	
+
 	p.running = false
 	p.cancel()
 	p.mu.Unlock()
-	
+
 	p.wg.Wait()
-	
+
 	// Safely close channels only if they haven't been closed
 	select {
 	case <-p.queue:
@@ -118,7 +118,7 @@ func (p *Pool) Stop() {
 	default:
 		close(p.queue)
 	}
-	
+
 	select {
 	case <-p.results:
 		// Already closed
@@ -131,11 +131,11 @@ func (p *Pool) Stop() {
 func (p *Pool) Submit(task Task) error {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	
+
 	if !p.running {
 		return fmt.Errorf("pool is not running")
 	}
-	
+
 	select {
 	case p.queue <- task:
 		return nil
@@ -157,7 +157,7 @@ func (p *Pool) Results() <-chan Result {
 // worker is the worker goroutine
 func (p *Pool) worker(id int) {
 	defer p.wg.Done()
-	
+
 	for {
 		select {
 		case <-p.ctx.Done():
@@ -166,11 +166,11 @@ func (p *Pool) worker(id int) {
 			if !ok {
 				return
 			}
-			
+
 			ctx, cancel := context.WithTimeout(p.ctx, 30*time.Second)
 			err := task.Execute(ctx)
 			cancel()
-			
+
 			select {
 			case p.results <- Result{Task: task, Error: err}:
 			case <-p.ctx.Done():
@@ -197,30 +197,28 @@ func Map[T any, R any](ctx context.Context, items []T, fn func(T) (R, error), wo
 	if len(items) == 0 {
 		return []R{}, nil
 	}
-	
+
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	
+
 	results := make([]R, len(items))
 	errChan := make(chan error, len(items))
-	
+
 	// Create work channel
 	workChan := make(chan int, len(items))
 	for i := range items {
 		workChan <- i
 	}
 	close(workChan)
-	
+
 	// Create worker group
 	var wg sync.WaitGroup
-	
+
 	// Start workers
 	for i := 0; i < workers && i < len(items); i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			
+		wg.Go(func() {
+
 			for {
 				select {
 				case <-ctx.Done():
@@ -229,7 +227,7 @@ func Map[T any, R any](ctx context.Context, items []T, fn func(T) (R, error), wo
 					if !ok {
 						return
 					}
-					
+
 					result, err := fn(items[idx])
 					if err != nil {
 						select {
@@ -242,23 +240,23 @@ func Map[T any, R any](ctx context.Context, items []T, fn func(T) (R, error), wo
 					}
 				}
 			}
-		}()
+		})
 	}
-	
+
 	// Wait for completion
 	wg.Wait()
 	close(errChan)
-	
+
 	// Check for errors
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
-	
+
 	if len(errs) > 0 {
 		return results, fmt.Errorf("%d errors occurred during map operation", len(errs))
 	}
-	
+
 	return results, nil
 }
 
@@ -273,25 +271,25 @@ func ForEach[T any](ctx context.Context, items []T, fn func(T) error, workers in
 // Filter filters items concurrently
 func Filter[T any](ctx context.Context, items []T, predicate func(T) bool, workers int) ([]T, error) {
 	type result struct {
-		item  T
-		keep  bool
+		item T
+		keep bool
 	}
-	
+
 	results, err := Map(ctx, items, func(item T) (result, error) {
 		return result{item: item, keep: predicate(item)}, nil
 	}, workers)
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	var filtered []T
 	for _, r := range results {
 		if r.keep {
 			filtered = append(filtered, r.item)
 		}
 	}
-	
+
 	return filtered, nil
 }
 
@@ -299,12 +297,12 @@ func Filter[T any](ctx context.Context, items []T, predicate func(T) bool, worke
 func Parallel(ctx context.Context, fns ...func() error) []error {
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(fns))
-	
+
 	for _, fn := range fns {
 		wg.Add(1)
 		go func(f func() error) {
 			defer wg.Done()
-			
+
 			if err := f(); err != nil {
 				select {
 				case errChan <- err:
@@ -313,15 +311,15 @@ func Parallel(ctx context.Context, fns ...func() error) []error {
 			}
 		}(fn)
 	}
-	
+
 	wg.Wait()
 	close(errChan)
-	
+
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
-	
+
 	return errs
 }
 
@@ -386,11 +384,11 @@ func Race[T any](ctx context.Context, fns ...func(context.Context) (T, error)) (
 func Debounce(fn func(), duration time.Duration) func() {
 	var mu sync.Mutex
 	var timer *time.Timer
-	
+
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
-		
+
 		if timer != nil {
 			if !timer.Stop() {
 				select {
@@ -399,7 +397,7 @@ func Debounce(fn func(), duration time.Duration) func() {
 				}
 			}
 		}
-		
+
 		timer = time.AfterFunc(duration, fn)
 	}
 }
@@ -408,16 +406,16 @@ func Debounce(fn func(), duration time.Duration) func() {
 func Throttle(fn func(), duration time.Duration) func() {
 	var mu sync.Mutex
 	var last time.Time
-	
+
 	return func() {
 		mu.Lock()
 		defer mu.Unlock()
-		
+
 		now := time.Now()
 		if now.Sub(last) < duration {
 			return
 		}
-		
+
 		last = now
 		fn()
 	}

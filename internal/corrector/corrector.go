@@ -4,6 +4,7 @@ package corrector
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/agnivade/levenshtein"
@@ -22,13 +23,13 @@ type Correction struct {
 type Corrector struct {
 	// Common typos and their corrections
 	commonTypos map[string]string
-	
+
 	// Command patterns that are often confused
 	confusablePatterns map[string][]string
-	
+
 	// Dangerous patterns
 	dangerousPatterns []string
-	
+
 	// Known commands from history
 	historyCommands []string
 }
@@ -85,11 +86,11 @@ func (c *Corrector) Correct(command string) (*Correction, error) {
 // checkDangerous checks for dangerous commands
 func (c *Corrector) checkDangerous(command string) *Correction {
 	cmdLower := strings.ToLower(strings.TrimSpace(command))
-	
+
 	// Exact dangerous matches
 	for _, pattern := range c.dangerousPatterns {
-		if cmdLower == strings.ToLower(pattern) || 
-		   strings.HasPrefix(cmdLower, strings.ToLower(pattern)) {
+		if cmdLower == strings.ToLower(pattern) ||
+			strings.HasPrefix(cmdLower, strings.ToLower(pattern)) {
 			return &Correction{
 				Original:    command,
 				Corrected:   "",
@@ -183,14 +184,12 @@ func (c *Corrector) checkConfusablePatterns(command string) *Correction {
 
 	// Check for missing 'git' prefix
 	gitSubcommands := []string{"status", "add", "commit", "push", "pull", "branch", "log", "checkout", "merge", "rebase", "clone", "init"}
-	for _, subcmd := range gitSubcommands {
-		if firstWord == subcmd {
-			return &Correction{
-				Original:    command,
-				Corrected:   "git " + command,
-				Confidence:  0.75,
-				Explanation: fmt.Sprintf("Did you forget 'git'? Try: git %s", command),
-			}
+	if slices.Contains(gitSubcommands, firstWord) {
+		return &Correction{
+			Original:    command,
+			Corrected:   "git " + command,
+			Confidence:  0.75,
+			Explanation: fmt.Sprintf("Did you forget 'git'? Try: git %s", command),
 		}
 	}
 
@@ -233,7 +232,7 @@ func (c *Corrector) checkHistory(command string) *Correction {
 
 	bestMatch := ""
 	bestDistance := 3 // Maximum acceptable distance
-	
+
 	for _, histCmd := range c.historyCommands {
 		distance := levenshtein.ComputeDistance(command, histCmd)
 		if distance < bestDistance && distance > 0 {
@@ -282,14 +281,14 @@ func (c *Corrector) SuggestAlternative(command string) []string {
 
 	// Suggest modern alternatives
 	alternatives := map[string][]string{
-		"ls":     {"exa", "lsd"},
-		"cat":    {"bat", "batcat"},
-		"find":   {"fd"},
-		"grep":   {"ripgrep", "rg"},
-		"ps":     {"procs"},
-		"top":    {"htop", "btop"},
-		"du":     {"dust"},
-		"df":     {"duf"},
+		"ls":   {"exa", "lsd"},
+		"cat":  {"bat", "batcat"},
+		"find": {"fd"},
+		"grep": {"ripgrep", "rg"},
+		"ps":   {"procs"},
+		"top":  {"htop", "btop"},
+		"du":   {"dust"},
+		"df":   {"duf"},
 	}
 
 	if alts, ok := alternatives[firstWord]; ok {
@@ -303,57 +302,57 @@ func (c *Corrector) SuggestAlternative(command string) []string {
 func initializeCommonTypos() map[string]string {
 	return map[string]string{
 		// Git typos
-		"gti":        "git",
-		"tit":        "git",
-		"gi":         "git",
-		"gt":         "git",
-		"gut":        "git",
-		"gitp ull":   "git pull",
-		"gitp uhs":   "git push",
-		"git satus":  "git status",
-		"git stauts": "git status",
-		"git commti": "git commit",
+		"gti":          "git",
+		"tit":          "git",
+		"gi":           "git",
+		"gt":           "git",
+		"gut":          "git",
+		"gitp ull":     "git pull",
+		"gitp uhs":     "git push",
+		"git satus":    "git status",
+		"git stauts":   "git status",
+		"git commti":   "git commit",
 		"git chekcout": "git checkout",
-		
+
 		// Docker typos
-		"docer":      "docker",
-		"doccker":    "docker",
-		"doker":      "docker",
-		"dcoekr":     "docker",
-		
+		"docer":   "docker",
+		"doccker": "docker",
+		"doker":   "docker",
+		"dcoekr":  "docker",
+
 		// Common command typos
-		"sl":         "ls",
-		"ks":         "ls",
-		"lss":        "ls",
-		"cd..":       "cd ..",
-		"cd-":        "cd -",
-		"grpe":       "grep",
-		"grp":        "grep",
-		"gr":         "grep",
-		"tial":       "tail",
-		"taill":      "tail",
-		"cAT":        "cat",
-		"mkr":        "mkdir",
-		"makedir":    "mkdir",
-		"mkidr":      "mkdir",
-		
+		"sl":      "ls",
+		"ks":      "ls",
+		"lss":     "ls",
+		"cd..":    "cd ..",
+		"cd-":     "cd -",
+		"grpe":    "grep",
+		"grp":     "grep",
+		"gr":      "grep",
+		"tial":    "tail",
+		"taill":   "tail",
+		"cAT":     "cat",
+		"mkr":     "mkdir",
+		"makedir": "mkdir",
+		"mkidr":   "mkdir",
+
 		// Package manager typos
-		"npn":        "npm",
-		"nom":        "npm",
-		"pni":        "npm install",
-		" isntall":   " install",
-		
+		"npn":      "npm",
+		"nom":      "npm",
+		"pni":      "npm install",
+		" isntall": " install",
+
 		// Go typos
 		"go bulid":   "go build",
 		"go buld":    "go build",
 		"go tset":    "go test",
 		"go isntall": "go install",
-		
+
 		// Python typos
-		"pthon":      "python",
-		"pyton":      "python",
-		"pyp":        "pip",
-		"pp":         "pip",
+		"pthon": "python",
+		"pyton": "python",
+		"pyp":   "pip",
+		"pp":    "pip",
 	}
 }
 
@@ -361,12 +360,12 @@ func initializeCommonTypos() map[string]string {
 func initializeConfusablePatterns() map[string][]string {
 	return map[string][]string{
 		// Commands that are often confused with each other
-		"docker":     {"docker-compose", "docker compose"},
-		"compose":    {"docker-compose"},
-		"kubectl":    {"kubectx", "kubens"},
-		"pip":        {"pip3"},
-		"python":     {"python3"},
-		"node":       {"nodejs"},
-		"code":       {"code ."},
+		"docker":  {"docker-compose", "docker compose"},
+		"compose": {"docker-compose"},
+		"kubectl": {"kubectx", "kubens"},
+		"pip":     {"pip3"},
+		"python":  {"python3"},
+		"node":    {"nodejs"},
+		"code":    {"code ."},
 	}
 }

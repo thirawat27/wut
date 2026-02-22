@@ -26,7 +26,7 @@ var explainCmd = &cobra.Command{
 }
 
 var (
-	explainVerbose bool
+	explainVerbose   bool
 	explainDangerous bool
 )
 
@@ -73,17 +73,17 @@ func runExplain(cmd *cobra.Command, args []string) error {
 
 // Explanation holds command explanation
 type Explanation struct {
-	Command        string
-	Summary        string
-	Description    string
-	Arguments      []Argument
-	Flags          []Flag
-	Examples       []Example
-	Warnings       []string
-	Tips           []string
-	IsDangerous    bool
-	DangerLevel    string
-	Alternatives   []string
+	Command      string
+	Summary      string
+	Description  string
+	Arguments    []Argument
+	Flags        []Flag
+	Examples     []Example
+	Warnings     []string
+	Tips         []string
+	IsDangerous  bool
+	DangerLevel  string
+	Alternatives []string
 }
 
 // Argument represents a command argument
@@ -129,16 +129,16 @@ func generateExplanation(ctx context.Context, parsed *ParsedCommand, cfg *config
 	// In production, this would use a comprehensive command database
 
 	explanation := &Explanation{
-		Command:     parsed.Raw,
-		Summary:     generateSummary(parsed),
-		Description: generateDescription(parsed),
-		Arguments:   extractArguments(parsed),
-		Flags:       extractFlagsV2(parsed),
-		Examples:    generateExamples(parsed),
-		Warnings:    generateWarnings(parsed),
-		Tips:        generateTips(parsed),
-		IsDangerous: checkIfDangerous(parsed),
-		DangerLevel: calculateDangerLevel(parsed),
+		Command:      parsed.Raw,
+		Summary:      generateSummary(parsed),
+		Description:  generateDescription(parsed),
+		Arguments:    extractArguments(parsed),
+		Flags:        extractFlagsV2(parsed),
+		Examples:     generateExamples(parsed),
+		Warnings:     generateWarnings(parsed),
+		Tips:         generateTips(parsed),
+		IsDangerous:  checkIfDangerous(parsed),
+		DangerLevel:  calculateDangerLevel(parsed),
 		Alternatives: generateAlternatives(parsed),
 	}
 
@@ -342,23 +342,23 @@ func generateExamples(parsed *ParsedCommand) []Example {
 
 func generateWarnings(parsed *ParsedCommand) []string {
 	var warnings []string
-	
+
 	// Check for dangerous patterns
 	cmd := strings.ToLower(parsed.Raw)
-	
+
 	if strings.Contains(cmd, "rm -rf") || strings.Contains(cmd, "rm -r -f") {
 		warnings = append(warnings, "This will recursively and forcefully delete files")
 		warnings = append(warnings, "Deleted files cannot be easily recovered")
 	}
-	
+
 	if strings.Contains(cmd, "> /dev/") || strings.Contains(cmd, "> /") {
 		warnings = append(warnings, "This may overwrite system files")
 	}
-	
+
 	if strings.Contains(cmd, "chmod -R 777") || strings.Contains(cmd, "chmod -R 666") {
 		warnings = append(warnings, "This gives everyone full permissions to files")
 	}
-	
+
 	if strings.Contains(cmd, "mkfs") || strings.Contains(cmd, "dd if=") {
 		warnings = append(warnings, "This can destroy data on storage devices")
 	}
@@ -368,24 +368,24 @@ func generateWarnings(parsed *ParsedCommand) []string {
 
 func generateTips(parsed *ParsedCommand) []string {
 	var tips []string
-	
+
 	cmd := strings.ToLower(parsed.Command)
-	
+
 	if cmd == "rm" {
 		tips = append(tips, "Use 'rm -i' for interactive mode to confirm each deletion")
 		tips = append(tips, "Consider using 'trash' command instead for safer deletion")
 	}
-	
+
 	if cmd == "git" {
 		tips = append(tips, "Use 'git status' before committing to review changes")
 	}
-	
+
 	return tips
 }
 
 func checkIfDangerous(parsed *ParsedCommand) bool {
 	cmd := strings.ToLower(parsed.Raw)
-	
+
 	dangerousPatterns := []string{
 		"rm -rf /",
 		"rm -rf *",
@@ -395,13 +395,13 @@ func checkIfDangerous(parsed *ParsedCommand) bool {
 		":(){ :|:& };:",
 		"chmod -R 777 /",
 	}
-	
+
 	for _, pattern := range dangerousPatterns {
 		if strings.Contains(cmd, pattern) {
 			return true
 		}
 	}
-	
+
 	return false
 }
 
@@ -409,25 +409,25 @@ func calculateDangerLevel(parsed *ParsedCommand) string {
 	if !checkIfDangerous(parsed) {
 		return "safe"
 	}
-	
+
 	cmd := strings.ToLower(parsed.Raw)
-	
-	if strings.Contains(cmd, "rm -rf /") || 
-	   strings.Contains(cmd, "mkfs") ||
-	   strings.Contains(cmd, ":(){ :|:& }:") {
+
+	if strings.Contains(cmd, "rm -rf /") ||
+		strings.Contains(cmd, "mkfs") ||
+		strings.Contains(cmd, ":(){ :|:& }:") {
 		return "critical"
 	}
-	
+
 	if strings.Contains(cmd, "rm -rf") {
 		return "high"
 	}
-	
+
 	return "medium"
 }
 
 func generateAlternatives(parsed *ParsedCommand) []string {
 	cmd := strings.ToLower(parsed.Command)
-	
+
 	alternatives := map[string][]string{
 		"rm": {
 			"Use 'trash' command to move files to trash instead of deleting",
@@ -437,10 +437,10 @@ func generateAlternatives(parsed *ParsedCommand) []string {
 			"Use 'rsync' for better progress and resume capability",
 		},
 	}
-	
+
 	if alts, ok := alternatives[cmd]; ok {
 		return alts
 	}
-	
+
 	return nil
 }

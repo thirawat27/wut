@@ -8,31 +8,32 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 )
 
 // Context holds information about the current environment
 type Context struct {
-	WorkingDir     string
-	HomeDir        string
-	IsGitRepo      bool
-	GitBranch      string
-	GitStatus      GitStatus
-	ProjectType    string
-	ProjectFiles   []string
-	Environment    map[string]string
-	Shell          string
-	OS             string
+	WorkingDir   string
+	HomeDir      string
+	IsGitRepo    bool
+	GitBranch    string
+	GitStatus    GitStatus
+	ProjectType  string
+	ProjectFiles []string
+	Environment  map[string]string
+	Shell        string
+	OS           string
 }
 
 // GitStatus represents git repository status
 type GitStatus struct {
-	IsClean       bool
-	ModifiedFiles []string
-	StagedFiles   []string
+	IsClean        bool
+	ModifiedFiles  []string
+	StagedFiles    []string
 	UntrackedFiles []string
-	Ahead         int
-	Behind        int
+	Ahead          int
+	Behind         int
 }
 
 // Analyzer analyzes the current context
@@ -60,29 +61,29 @@ func (a *Analyzer) Analyze() (*Context, error) {
 		return nil, fmt.Errorf("working directory is empty")
 	}
 	a.context.WorkingDir = wd
-	
+
 	// Get home directory
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, err
 	}
 	a.context.HomeDir = home
-	
+
 	// Detect OS
 	a.context.OS = detectOS()
-	
+
 	// Detect shell
 	a.context.Shell = detectShell()
-	
+
 	// Analyze git context
 	a.analyzeGit()
-	
+
 	// Detect project type
 	a.detectProjectType()
-	
+
 	// Get environment variables
 	a.getEnvironment()
-	
+
 	return a.context, nil
 }
 
@@ -94,14 +95,14 @@ func (a *Analyzer) analyzeGit() {
 		a.context.IsGitRepo = false
 		return
 	}
-	
+
 	a.context.IsGitRepo = true
-	
+
 	// Get current branch
 	if branch, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		a.context.GitBranch = strings.TrimSpace(string(branch))
 	}
-	
+
 	// Get git status
 	a.context.GitStatus = a.getGitStatus()
 }
@@ -109,30 +110,30 @@ func (a *Analyzer) analyzeGit() {
 // getGitStatus gets detailed git status
 func (a *Analyzer) getGitStatus() GitStatus {
 	status := GitStatus{}
-	
+
 	// Check if clean
 	if output, err := exec.Command("git", "status", "--porcelain").Output(); err == nil {
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 		status.IsClean = len(lines) == 0 || (len(lines) == 1 && lines[0] == "")
-		
+
 		for _, line := range lines {
 			if len(line) < 2 {
 				continue
 			}
-			
+
 			// Parse porcelain output
 			indexStatus := line[0]
 			workTreeStatus := ' '
 			if len(line) > 1 {
 				workTreeStatus = rune(line[1])
 			}
-			
+
 			// Get filename (starts at position 3)
 			filename := ""
 			if len(line) > 3 {
 				filename = strings.TrimSpace(line[3:])
 			}
-			
+
 			// Check for renamed files
 			if strings.Contains(filename, " -> ") {
 				parts := strings.Split(filename, " -> ")
@@ -140,12 +141,12 @@ func (a *Analyzer) getGitStatus() GitStatus {
 					filename = parts[1]
 				}
 			}
-			
+
 			switch indexStatus {
 			case 'M', 'A', 'D', 'R', 'C':
 				status.StagedFiles = append(status.StagedFiles, filename)
 			}
-			
+
 			switch workTreeStatus {
 			case 'M', 'D':
 				status.ModifiedFiles = append(status.ModifiedFiles, filename)
@@ -154,7 +155,7 @@ func (a *Analyzer) getGitStatus() GitStatus {
 			}
 		}
 	}
-	
+
 	// Get ahead/behind
 	if output, err := exec.Command("git", "rev-list", "--left-right", "--count", "HEAD...@{u}").Output(); err == nil {
 		var ahead, behind int
@@ -163,7 +164,7 @@ func (a *Analyzer) getGitStatus() GitStatus {
 			status.Behind = behind
 		}
 	}
-	
+
 	return status
 }
 
@@ -173,7 +174,7 @@ func (a *Analyzer) detectProjectType() {
 	if err != nil {
 		return
 	}
-	
+
 	var projectFiles []string
 	for _, file := range files {
 		if !file.IsDir() {
@@ -181,19 +182,19 @@ func (a *Analyzer) detectProjectType() {
 		}
 	}
 	a.context.ProjectFiles = projectFiles
-	
+
 	// Detect project type based on files (priority order)
 	// Check primary project files first
 	primaryPatterns := map[string][]string{
-		"go":        {"go.mod"},
-		"nodejs":    {"package.json"},
-		"python":    {"requirements.txt", "setup.py", "pyproject.toml", "Pipfile"},
-		"rust":      {"Cargo.toml"},
-		"ruby":      {"Gemfile"},
-		"java":      {"pom.xml", "build.gradle", "build.gradle.kts"},
-		"dotnet":    {"*.csproj", "*.sln"},
+		"go":     {"go.mod"},
+		"nodejs": {"package.json"},
+		"python": {"requirements.txt", "setup.py", "pyproject.toml", "Pipfile"},
+		"rust":   {"Cargo.toml"},
+		"ruby":   {"Gemfile"},
+		"java":   {"pom.xml", "build.gradle", "build.gradle.kts"},
+		"dotnet": {"*.csproj", "*.sln"},
 	}
-	
+
 	// Check primary patterns first
 	for projectType, patterns := range primaryPatterns {
 		for _, pattern := range patterns {
@@ -203,7 +204,7 @@ func (a *Analyzer) detectProjectType() {
 			}
 		}
 	}
-	
+
 	// Check secondary patterns (docker, terraform, etc.)
 	secondaryPatterns := map[string][]string{
 		"docker":     {"Dockerfile", "docker-compose.yml", "docker-compose.yaml", ".dockerignore"},
@@ -211,7 +212,7 @@ func (a *Analyzer) detectProjectType() {
 		"ansible":    {"ansible.cfg", "inventory", "playbook.yml", "playbook.yaml"},
 		"kubernetes": {"*.yaml", "*.yml", "k8s", "manifests"},
 	}
-	
+
 	for projectType, patterns := range secondaryPatterns {
 		for _, pattern := range patterns {
 			if matchPattern(projectFiles, pattern) {
@@ -220,13 +221,13 @@ func (a *Analyzer) detectProjectType() {
 			}
 		}
 	}
-	
+
 	// Check for git repo last
 	if a.context.IsGitRepo {
 		a.context.ProjectType = "git"
 		return
 	}
-	
+
 	a.context.ProjectType = "unknown"
 }
 
@@ -237,7 +238,7 @@ func (a *Analyzer) getEnvironment() {
 		"PATH", "LANG", "TERM",
 		"SSH_CONNECTION", "SSH_CLIENT",
 	}
-	
+
 	for _, v := range relevantVars {
 		if val := os.Getenv(v); val != "" {
 			a.context.Environment[v] = val
@@ -255,24 +256,24 @@ func (a *Analyzer) GetRelevantCommands() []string {
 	if a.context == nil {
 		return nil
 	}
-	
+
 	var commands []string
-	
+
 	// Git context commands
 	if a.context.IsGitRepo {
 		commands = append(commands, a.getGitCommands()...)
 	}
-	
+
 	// Project type specific commands
 	commands = append(commands, a.getProjectCommands()...)
-	
+
 	return commands
 }
 
 // getGitCommands returns git commands based on context
 func (a *Analyzer) getGitCommands() []string {
 	var commands []string
-	
+
 	// Based on git status
 	if !a.context.GitStatus.IsClean {
 		if len(a.context.GitStatus.StagedFiles) > 0 {
@@ -285,7 +286,7 @@ func (a *Analyzer) getGitCommands() []string {
 			commands = append(commands, "git add .")
 		}
 	}
-	
+
 	// Based on branch status
 	if a.context.GitStatus.Ahead > 0 {
 		commands = append(commands, "git push")
@@ -293,10 +294,10 @@ func (a *Analyzer) getGitCommands() []string {
 	if a.context.GitStatus.Behind > 0 {
 		commands = append(commands, "git pull")
 	}
-	
+
 	// Always relevant
 	commands = append(commands, "git status", "git log --oneline -10")
-	
+
 	return commands
 }
 
@@ -377,7 +378,7 @@ func detectShell() string {
 	if shell != "" {
 		return filepath.Base(shell)
 	}
-	
+
 	// Windows detection
 	if runtime.GOOS == "windows" {
 		// Check for PowerShell first (more common now)
@@ -394,17 +395,12 @@ func detectShell() string {
 		}
 		return "cmd"
 	}
-	
+
 	return "sh" // Default fallback
 }
 
 func matchPattern(files []string, pattern string) bool {
 	// Simple glob matching
 	re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), "\\*", ".*") + "$")
-	for _, file := range files {
-		if re.MatchString(file) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(files, re.MatchString)
 }

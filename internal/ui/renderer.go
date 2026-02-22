@@ -81,7 +81,7 @@ func (r *Renderer) PrintBox(content string) {
 				maxLen = len(line)
 			}
 		}
-		
+
 		fmt.Println("+" + strings.Repeat("-", maxLen+2) + "+")
 		for _, line := range lines {
 			fmt.Printf("| %s%s |\n", line, strings.Repeat(" ", maxLen-len(line)))
@@ -97,7 +97,7 @@ func (r *Renderer) Icon(name string) string {
 	if r.caps == nil {
 		r.caps = detectCapabilities()
 	}
-	
+
 	icons := map[string]map[string]string{
 		"check": {
 			"emoji": "✓",
@@ -150,12 +150,12 @@ func (r *Renderer) Icon(name string) string {
 			"nerd":  "\uf15b",
 		},
 	}
-	
+
 	iconSet, ok := icons[name]
 	if !ok {
 		return ""
 	}
-	
+
 	if r.caps.ShouldUseNerdFonts() {
 		return iconSet["nerd"]
 	}

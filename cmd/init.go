@@ -37,11 +37,11 @@ Run this when you first install WUT or want to reconfigure.`,
 }
 
 var (
-	initQuick      bool
-	initShell      string
-	initSkipTLDR   bool
-	initSkipShell  bool
-	initNonTUI     bool
+	initQuick     bool
+	initShell     string
+	initSkipTLDR  bool
+	initSkipShell bool
+	initNonTUI    bool
 )
 
 func init() {
@@ -195,7 +195,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 			if choice == "" || choice == "y" || choice == "yes" {
 				fmt.Println("   Downloading popular TLDR pages...")
-					// Run db sync
+				// Run db sync
 				dbCmd.SetArgs([]string{"sync"})
 				if err := dbCmd.Execute(); err != nil {
 					fmt.Printf("   ⚠️  TLDR sync failed: %v\n", err)

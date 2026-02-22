@@ -183,7 +183,7 @@ func (m *Metrics) GetUptime() time.Duration {
 }
 
 // Snapshot returns a snapshot of current metrics
-func (m *Metrics) Snapshot() map[string]interface{} {
+func (m *Metrics) Snapshot() map[string]any {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
@@ -199,25 +199,25 @@ func (m *Metrics) Snapshot() map[string]interface{} {
 	}
 	m.mu.RUnlock()
 
-	return map[string]interface{}{
+	return map[string]any{
 		"commands": map[string]int64{
 			"suggested":    m.CommandsSuggested.Load(),
 			"executed":     m.CommandsExecuted.Load(),
 			"explained":    m.CommandsExplained.Load(),
 			"history_view": m.CommandsHistoryView.Load(),
 		},
-		"performance": map[string]interface{}{
+		"performance": map[string]any{
 			"requests":           m.RequestCount.Load(),
 			"errors":             m.RequestErrors.Load(),
 			"avg_request_time":   m.getAvgRequestTime(),
 			"active_connections": m.ActiveConnections.Load(),
 		},
-		"system": map[string]interface{}{
+		"system": map[string]any{
 			"uptime":     m.GetUptime().String(),
 			"version":    m.Version,
 			"commit":     m.Commit,
 			"goroutines": runtime.NumGoroutine(),
-			"memory": map[string]interface{}{
+			"memory": map[string]any{
 				"alloc":       memStats.Alloc,
 				"total_alloc": memStats.TotalAlloc,
 				"sys":         memStats.Sys,
@@ -258,7 +258,7 @@ func (m *Metrics) StartServer(ctx context.Context, addr string) error {
 		<-ctx.Done()
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		server.Shutdown(shutdownCtx)
+		_ = server.Shutdown(shutdownCtx)
 	}()
 
 	return server.ListenAndServe()
@@ -272,19 +272,19 @@ func (m *Metrics) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 // handleHealth handles /health endpoint
 func (m *Metrics) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	response := map[string]interface{}{
+	response := map[string]any{
 		"status":    "healthy",
 		"uptime":    m.GetUptime().String(),
 		"version":   m.Version,
 		"timestamp": time.Now().UTC().Format(time.RFC3339),
 	}
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // Convenience functions

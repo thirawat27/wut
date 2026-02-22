@@ -36,15 +36,15 @@ Boolean values can be: true, false, 1, 0, yes, no, on, off`,
 }
 
 var (
-	configList    bool
-	configGet     string
-	configSet     string
-	configValue   string
-	configReset   bool
-	configEdit    bool
-	configImport  string
-	configExport  string
-	configPath    bool
+	configList   bool
+	configGet    string
+	configSet    string
+	configValue  string
+	configReset  bool
+	configEdit   bool
+	configImport string
+	configExport string
+	configPath   bool
 )
 
 func init() {
@@ -244,9 +244,9 @@ type configField struct {
 
 var configFieldMap = map[string]configField{
 	// App
-	"app.name":     {[]int{0, 0}, "string", setString},
-	"app.version":  {[]int{0, 1}, "string", setString},
-	"app.debug":    {[]int{0, 2}, "bool", setBool},
+	"app.name":    {[]int{0, 0}, "string", setString},
+	"app.version": {[]int{0, 1}, "string", setString},
+	"app.debug":   {[]int{0, 2}, "bool", setBool},
 	// Fuzzy
 	"fuzzy.enabled":        {[]int{1, 0}, "bool", setBool},
 	"fuzzy.case_sensitive": {[]int{1, 1}, "bool", setBool},
@@ -273,15 +273,15 @@ var configFieldMap = map[string]configField{
 	"database.backup_interval": {[]int{3, 4}, "int", setInt},
 	"database.backupInterval":  {[]int{3, 4}, "int", setInt},
 	// History
-	"history.enabled":        {[]int{4, 0}, "bool", setBool},
-	"history.max_entries":    {[]int{4, 1}, "int", setInt},
-	"history.maxEntries":     {[]int{4, 1}, "int", setInt},
+	"history.enabled":         {[]int{4, 0}, "bool", setBool},
+	"history.max_entries":     {[]int{4, 1}, "int", setInt},
+	"history.maxEntries":      {[]int{4, 1}, "int", setInt},
 	"history.track_frequency": {[]int{4, 2}, "bool", setBool},
-	"history.trackFrequency": {[]int{4, 2}, "bool", setBool},
-	"history.track_context":  {[]int{4, 3}, "bool", setBool},
-	"history.trackContext":   {[]int{4, 3}, "bool", setBool},
-	"history.track_timing":   {[]int{4, 4}, "bool", setBool},
-	"history.trackTiming":    {[]int{4, 4}, "bool", setBool},
+	"history.trackFrequency":  {[]int{4, 2}, "bool", setBool},
+	"history.track_context":   {[]int{4, 3}, "bool", setBool},
+	"history.trackContext":    {[]int{4, 3}, "bool", setBool},
+	"history.track_timing":    {[]int{4, 4}, "bool", setBool},
+	"history.trackTiming":     {[]int{4, 4}, "bool", setBool},
 	// Context
 	"context.enabled":            {[]int{5, 0}, "bool", setBool},
 	"context.git_integration":    {[]int{5, 1}, "bool", setBool},
@@ -295,14 +295,14 @@ var configFieldMap = map[string]configField{
 	// Shell
 	"shell.enabled": {[]int{6, 0}, "bool", setBool},
 	// Privacy
-	"privacy.local_only":       {[]int{7, 0}, "bool", setBool},
-	"privacy.localOnly":        {[]int{7, 0}, "bool", setBool},
-	"privacy.encrypt_data":     {[]int{7, 1}, "bool", setBool},
-	"privacy.encryptData":      {[]int{7, 1}, "bool", setBool},
+	"privacy.local_only":         {[]int{7, 0}, "bool", setBool},
+	"privacy.localOnly":          {[]int{7, 0}, "bool", setBool},
+	"privacy.encrypt_data":       {[]int{7, 1}, "bool", setBool},
+	"privacy.encryptData":        {[]int{7, 1}, "bool", setBool},
 	"privacy.anonymize_commands": {[]int{7, 2}, "bool", setBool},
 	"privacy.anonymizeCommands":  {[]int{7, 2}, "bool", setBool},
-	"privacy.share_analytics":  {[]int{7, 3}, "bool", setBool},
-	"privacy.shareAnalytics":   {[]int{7, 3}, "bool", setBool},
+	"privacy.share_analytics":    {[]int{7, 3}, "bool", setBool},
+	"privacy.shareAnalytics":     {[]int{7, 3}, "bool", setBool},
 	// Logging
 	"logging.level":       {[]int{8, 0}, "string", setString},
 	"logging.file":        {[]int{8, 1}, "string", setString},
@@ -313,19 +313,19 @@ var configFieldMap = map[string]configField{
 	"logging.max_age":     {[]int{8, 4}, "int", setInt},
 	"logging.maxAge":      {[]int{8, 4}, "int", setInt},
 	// TLDR
-	"tldr.enabled":           {[]int{9, 0}, "bool", setBool},
-	"tldr.auto_sync":         {[]int{9, 1}, "bool", setBool},
-	"tldr.autoSync":          {[]int{9, 1}, "bool", setBool},
+	"tldr.enabled":            {[]int{9, 0}, "bool", setBool},
+	"tldr.auto_sync":          {[]int{9, 1}, "bool", setBool},
+	"tldr.autoSync":           {[]int{9, 1}, "bool", setBool},
 	"tldr.auto_sync_interval": {[]int{9, 2}, "int", setInt},
 	"tldr.autoSyncInterval":   {[]int{9, 2}, "int", setInt},
-	"tldr.offline_mode":      {[]int{9, 3}, "bool", setBool},
-	"tldr.offlineMode":       {[]int{9, 3}, "bool", setBool},
+	"tldr.offline_mode":       {[]int{9, 3}, "bool", setBool},
+	"tldr.offlineMode":        {[]int{9, 3}, "bool", setBool},
 	"tldr.auto_detect_online": {[]int{9, 4}, "bool", setBool},
 	"tldr.autoDetectOnline":   {[]int{9, 4}, "bool", setBool},
-	"tldr.max_cache_age":     {[]int{9, 5}, "int", setInt},
-	"tldr.maxCacheAge":       {[]int{9, 5}, "int", setInt},
-	"tldr.default_platform":  {[]int{9, 6}, "string", setString},
-	"tldr.defaultPlatform":   {[]int{9, 6}, "string", setString},
+	"tldr.max_cache_age":      {[]int{9, 5}, "int", setInt},
+	"tldr.maxCacheAge":        {[]int{9, 5}, "int", setInt},
+	"tldr.default_platform":   {[]int{9, 6}, "string", setString},
+	"tldr.defaultPlatform":    {[]int{9, 6}, "string", setString},
 }
 
 // Setter functions
@@ -371,7 +371,7 @@ func setFloat64(v reflect.Value, s string) error {
 	return nil
 }
 
-func getConfigValue(key string) (interface{}, error) {
+func getConfigValue(key string) (any, error) {
 	// Normalize key (lowercase, replace spaces with dots)
 	key = strings.ToLower(strings.TrimSpace(key))
 	key = strings.ReplaceAll(key, " ", ".")

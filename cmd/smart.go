@@ -12,10 +12,10 @@ import (
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
+	appctx "wut/internal/context"
 	"wut/internal/corrector"
 	"wut/internal/db"
 	"wut/internal/logger"
-	appctx "wut/internal/context"
 	"wut/internal/smart"
 	"wut/internal/ui"
 )
@@ -51,7 +51,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 	// Use shorter timeout to ensure responsiveness
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	
+
 	log := logger.With("smart")
 
 	// Get query from args
@@ -91,11 +91,11 @@ func runSmart(cmd *cobra.Command, args []string) error {
 	// Initialize storage with timeout check
 	cfg := config.Get()
 	var storage *db.Storage
-	
+
 	// Try to open storage with timeout
 	storageCh := make(chan *db.Storage, 1)
 	storageErrCh := make(chan error, 1)
-	
+
 	go func() {
 		s, err := db.NewStorage(cfg.Database.Path)
 		if err != nil {
@@ -104,7 +104,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		}
 		storageCh <- s
 	}()
-	
+
 	select {
 	case storage = <-storageCh:
 		// Successfully opened
@@ -120,11 +120,11 @@ func runSmart(cmd *cobra.Command, args []string) error {
 
 	// Create smart engine
 	engine := smart.NewEngine(storage)
-	
+
 	// Get intelligent suggestions with timeout
 	suggestionsCh := make(chan []smart.Suggestion, 1)
 	var suggestErr error
-	
+
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -138,7 +138,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		}
 		suggestionsCh <- sugs
 	}()
-	
+
 	var suggestions []smart.Suggestion
 	select {
 	case suggestions = <-suggestionsCh:
@@ -209,7 +209,7 @@ func printContextInfo(ctx *appctx.Context) {
 
 	if ctx.IsGitRepo {
 		info = append(info, fmt.Sprintf("Branch: %s", ctx.GitBranch))
-		
+
 		if ctx.GitStatus.Ahead > 0 {
 			info = append(info, fmt.Sprintf("↑ %d commits ahead", ctx.GitStatus.Ahead))
 		}
@@ -282,7 +282,7 @@ func printSmartSuggestions(suggestions []smart.Suggestion) {
 			Render(s.Source)
 
 		fmt.Printf("%s %s %s\n", icon, cmdColor.Render(s.Command), sourceColor)
-		
+
 		if s.Description != "" {
 			descStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6B7280"))
@@ -294,7 +294,7 @@ func printSmartSuggestions(suggestions []smart.Suggestion) {
 			fmt.Println()
 		}
 	}
-	
+
 	fmt.Println()
 	fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Tip: Use 'wut smart <query>' to search for specific commands"))
 }

@@ -53,10 +53,7 @@ func NewLRUCache[K comparable, V any](capacity, shards int) *LRUCache[K, V] {
 		shardMask:  uint64(shardCount - 1),
 	}
 
-	perShard := capacity / shardCount
-	if perShard < 16 {
-		perShard = 16
-	}
+	perShard := max(capacity/shardCount, 16)
 
 	for i := 0; i < shardCount; i++ {
 		c.shards[i] = newCacheShard[K, V](perShard)
@@ -355,11 +352,11 @@ func (c *ComputedCache[K, V]) GetOrCompute(key K) (V, error) {
 
 // CacheStats holds cache statistics
 type CacheStats struct {
-	Hits       atomic.Uint64
-	Misses     atomic.Uint64
-	Evictions  atomic.Uint64
-	Size       int
-	Capacity   int
+	Hits      atomic.Uint64
+	Misses    atomic.Uint64
+	Evictions atomic.Uint64
+	Size      int
+	Capacity  int
 }
 
 // HitRate returns the cache hit rate

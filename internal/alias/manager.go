@@ -4,6 +4,7 @@ package alias
 import (
 	"bufio"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -56,9 +57,7 @@ func (m *Manager) Load() error {
 
 	// Load from wut aliases
 	wutAliases, _ := m.loadFromWut()
-	for name, alias := range wutAliases {
-		m.aliases[name] = alias
-	}
+	maps.Copy(m.aliases, wutAliases)
 
 	return nil
 }
@@ -263,7 +262,7 @@ func (m *Manager) ApplyToShell() error {
 	if err != nil {
 		return fmt.Errorf("failed to get home directory: %w", err)
 	}
-	
+
 	var configFile string
 	switch m.shell {
 	case "bash":
@@ -293,14 +292,14 @@ func (m *Manager) ApplyToShell() error {
 	// Build aliases section
 	var aliasesSection strings.Builder
 	aliasesSection.WriteString(marker)
-	
+
 	// Get sorted list of alias names
 	var names []string
 	for name := range m.aliases {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	
+
 	for _, name := range names {
 		alias := m.aliases[name]
 		if alias.AutoGen || alias.Category == "shell" {
@@ -407,14 +406,14 @@ func (m *Manager) save() error {
 	// Build JSON manually for now
 	var sb strings.Builder
 	sb.WriteString("{\n")
-	
+
 	// Get sorted list of names
 	var names []string
 	for name := range m.aliases {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	
+
 	first := true
 	for _, name := range names {
 		alias := m.aliases[name]

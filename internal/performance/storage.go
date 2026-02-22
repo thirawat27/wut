@@ -33,18 +33,18 @@ type OptimizedStorage struct {
 
 // BatchConfig holds batch processing configuration
 type BatchConfig struct {
-	MaxSize   int
-	Timeout   time.Duration
-	Enabled   bool
+	MaxSize     int
+	Timeout     time.Duration
+	Enabled     bool
 	WriteBuffer int
 }
 
 // writeOp represents a write operation
 type writeOp struct {
-	bucket  string
-	key     []byte
-	value   []byte
-	done    chan error
+	bucket   string
+	key      []byte
+	value    []byte
+	done     chan error
 	isDelete bool
 }
 
@@ -74,7 +74,7 @@ func NewOptimizedStorageWithConfig(dbPath string, config BatchConfig) (*Optimize
 		Timeout:      1 * time.Second,
 		NoGrowSync:   false,
 		PageSize:     4096,
-		NoSync:       false, // Keep data safety
+		NoSync:       false,                 // Keep data safety
 		FreelistType: bbolt.FreelistMapType, // Better for high write throughput
 	})
 	if err != nil {
@@ -441,9 +441,8 @@ func (s *OptimizedStorage) Compact(dstPath string) error {
 // PrefetchCache preloads keys into cache
 func (s *OptimizedStorage) PrefetchCache(bucket string, keys []string) {
 	for _, key := range keys {
-		if _, err := s.Get(bucket, []byte(key)); err == nil {
-			// Successfully cached
-		}
+		_, _ = s.Get(bucket, []byte(key))
+		// Successfully cached
 	}
 }
 
@@ -467,7 +466,7 @@ func NewJSONStorage(dbPath string) (*JSONStorage, error) {
 }
 
 // GetJSON retrieves and unmarshals a JSON value
-func (s *JSONStorage) GetJSON(bucket string, key []byte, v interface{}) error {
+func (s *JSONStorage) GetJSON(bucket string, key []byte, v any) error {
 	data, err := s.Get(bucket, key)
 	if err != nil {
 		return err
@@ -476,7 +475,7 @@ func (s *JSONStorage) GetJSON(bucket string, key []byte, v interface{}) error {
 }
 
 // PutJSON marshals and stores a value
-func (s *JSONStorage) PutJSON(bucket string, key []byte, v interface{}) error {
+func (s *JSONStorage) PutJSON(bucket string, key []byte, v any) error {
 	data, err := json.Marshal(v)
 	if err != nil {
 		return err

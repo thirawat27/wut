@@ -173,7 +173,7 @@ func runDBClear(cmd *cobra.Command, args []string) error {
 	// Confirm
 	fmt.Print("⚠️  Are you sure you want to clear the database? [y/N]: ")
 	var response string
-	fmt.Scanln(&response)
+	_, _ = fmt.Scanln(&response)
 	if response != "y" && response != "Y" {
 		fmt.Println("Cancelled")
 		return nil
@@ -305,16 +305,7 @@ func formatSyncResult(result *db.SyncResult) string {
 	return b.String()
 }
 
-// formatStatus formats the status for display
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-func formatStatus(stats map[string]interface{}) string {
+func formatStatus(stats map[string]any) string {
 	var b strings.Builder
 
 	// Title

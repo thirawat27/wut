@@ -81,9 +81,9 @@ func runUninstall() error {
 
 func installShellIntegration(sh string) error {
 	installer := shell.NewInstaller()
-	
+
 	fmt.Printf("Installing WUT integration for %s...\n", sh)
-	
+
 	configFile, err := getShellConfigFile(sh)
 	if err != nil {
 		return err
@@ -111,7 +111,7 @@ func installShellIntegration(sh string) error {
 
 	// Add marker comment
 	marker := fmt.Sprintf("\n# WUT Shell Integration - Added by 'wut install'\n%s\n# End WUT Shell Integration\n", shellCode)
-	
+
 	if _, err := f.WriteString(marker); err != nil {
 		return fmt.Errorf("failed to write shell config: %w", err)
 	}
@@ -123,7 +123,7 @@ func installShellIntegration(sh string) error {
 	fmt.Println("  • Ctrl+G     - Open WUT with current command")
 	fmt.Println()
 	fmt.Printf("Please restart your shell or run: source %s\n", configFile)
-	
+
 	_ = installer // Use the installer
 	return nil
 }
@@ -216,7 +216,7 @@ func detectShell() string {
 
 func detectAllShells() []string {
 	var shells []string
-	
+
 	// Check for common shells
 	candidates := []string{"bash", "zsh", "fish"}
 	if runtime.GOOS == "windows" {
@@ -250,7 +250,7 @@ func getShellConfigFile(sh string) (string, error) {
 			// Try PowerShell Core first, then Windows PowerShell
 			psCorePath := filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
 			psWinPath := filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
-			
+
 			// Check which one exists, prefer PowerShell Core
 			if _, err := os.Stat(psCorePath); err == nil {
 				return psCorePath, nil

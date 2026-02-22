@@ -340,7 +340,7 @@ func fastIndexASCII(s, substr string) int {
 	first := substr[0]
 	max := len(s) - len(substr) + 1
 
-	for i := 0; i < max; i++ {
+	for i := range max {
 		if s[i] == first {
 			match := true
 			for j := 1; j < len(substr); j++ {
@@ -547,8 +547,8 @@ func (m *SuffixMatcher) HasSuffix(s string) bool {
 
 // BoyerMoore provides Boyer-Moore string search
 type BoyerMoore struct {
-	pattern  []byte
-	badChar  [256]int
+	pattern []byte
+	badChar [256]int
 }
 
 // NewBoyerMoore creates a new Boyer-Moore searcher
@@ -566,7 +566,7 @@ func NewBoyerMoore(pattern string) *BoyerMoore {
 	for i := range bm.badChar {
 		bm.badChar[i] = -1
 	}
-	for i := 0; i < len(p); i++ {
+	for i := range p {
 		bm.badChar[p[i]] = i
 	}
 
@@ -599,10 +599,7 @@ func (bm *BoyerMoore) Search(text string) int {
 		}
 
 		// Shift based on bad character
-		badCharShift := j - bm.badChar[t[s+j]]
-		if badCharShift < 1 {
-			badCharShift = 1
-		}
+		badCharShift := max(j-bm.badChar[t[s+j]], 1)
 		s += badCharShift
 	}
 
@@ -617,7 +614,7 @@ type Trie struct {
 type trieNode struct {
 	children [256]*trieNode
 	isEnd    bool
-	value    interface{}
+	value    any
 }
 
 // NewTrie creates a new trie
@@ -628,7 +625,7 @@ func NewTrie() *Trie {
 }
 
 // Insert adds a word to the trie
-func (t *Trie) Insert(word string, value interface{}) {
+func (t *Trie) Insert(word string, value any) {
 	node := t.root
 	for i := 0; i < len(word); i++ {
 		c := word[i]
@@ -642,7 +639,7 @@ func (t *Trie) Insert(word string, value interface{}) {
 }
 
 // Search checks if word exists in trie
-func (t *Trie) Search(word string) (interface{}, bool) {
+func (t *Trie) Search(word string) (any, bool) {
 	node := t.root
 	for i := 0; i < len(word); i++ {
 		c := word[i]
@@ -687,7 +684,7 @@ func (t *Trie) dfs(node *trieNode, prefix string, results *[]string) {
 	if node.isEnd {
 		*results = append(*results, prefix)
 	}
-	for c := 0; c < 256; c++ {
+	for c := range 256 {
 		if node.children[c] != nil {
 			t.dfs(node.children[c], prefix+string(byte(c)), results)
 		}

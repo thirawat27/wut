@@ -11,13 +11,13 @@ import (
 
 // BenchmarkResult holds benchmark results
 type BenchmarkResult struct {
-	Name      string
-	Ops       uint64
-	Duration  time.Duration
-	Bytes     uint64
-	Allocs    uint64
-	Latency   time.Duration // Average latency
-	Throughput float64      // Ops per second
+	Name       string
+	Ops        uint64
+	Duration   time.Duration
+	Bytes      uint64
+	Allocs     uint64
+	Latency    time.Duration // Average latency
+	Throughput float64       // Ops per second
 }
 
 // String returns formatted benchmark result
@@ -92,9 +92,7 @@ func BenchmarkParallel(name string, duration time.Duration, workers int, fn func
 
 	// Start workers
 	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for {
 				select {
 				case <-done:
@@ -104,7 +102,7 @@ func BenchmarkParallel(name string, duration time.Duration, workers int, fn func
 					ops.Add(1)
 				}
 			}
-		}()
+		})
 	}
 
 	time.Sleep(duration)
@@ -126,15 +124,15 @@ func BenchmarkParallel(name string, duration time.Duration, workers int, fn func
 
 // LatencyDistribution measures latency distribution
 type LatencyDistribution struct {
-	Samples   []time.Duration
-	Count     int
-	Min       time.Duration
-	Max       time.Duration
-	Mean      time.Duration
-	P50       time.Duration
-	P95       time.Duration
-	P99       time.Duration
-	P999      time.Duration
+	Samples []time.Duration
+	Count   int
+	Min     time.Duration
+	Max     time.Duration
+	Mean    time.Duration
+	P50     time.Duration
+	P95     time.Duration
+	P99     time.Duration
+	P999    time.Duration
 }
 
 // MeasureLatency measures latency distribution
@@ -222,16 +220,16 @@ func (d LatencyDistribution) String() string {
 
 // ProfileOptions holds profiling options
 type ProfileOptions struct {
-	CPUProfile    bool
-	MemProfile    bool
-	BlockProfile  bool
-	MutexProfile  bool
-	Duration      time.Duration
+	CPUProfile   bool
+	MemProfile   bool
+	BlockProfile bool
+	MutexProfile bool
+	Duration     time.Duration
 }
 
 // Profiler provides profiling utilities
 type Profiler struct {
-	options ProfileOptions
+	options   ProfileOptions
 	startTime time.Time
 }
 
@@ -245,26 +243,26 @@ func NewProfiler(opts ProfileOptions) *Profiler {
 // Start starts profiling
 func (p *Profiler) Start() {
 	p.startTime = time.Now()
-	
-	if p.options.CPUProfile {
-		// CPU profiling would be implemented here
-		// Requires runtime/pprof
-	}
+
+	//if p.options.CPUProfile {
+	//	// CPU profiling would be implemented here
+	//	// Requires runtime/pprof
+	//}
 }
 
 // Stop stops profiling and returns results
 func (p *Profiler) Stop() ProfileResult {
 	duration := time.Since(p.startTime)
-	
+
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	
+
 	return ProfileResult{
-		Duration:    duration,
-		AllocBytes:  m.Alloc,
-		TotalAlloc:  m.TotalAlloc,
-		SysBytes:    m.Sys,
-		NumGC:       m.NumGC,
+		Duration:     duration,
+		AllocBytes:   m.Alloc,
+		TotalAlloc:   m.TotalAlloc,
+		SysBytes:     m.Sys,
+		NumGC:        m.NumGC,
 		NumGoroutine: runtime.NumGoroutine(),
 	}
 }
@@ -292,8 +290,8 @@ func (r ProfileResult) String() string {
 
 // ThroughputTester tests throughput over time
 type ThroughputTester struct {
-	interval  time.Duration
-	samples   []ThroughputSample
+	interval time.Duration
+	samples  []ThroughputSample
 }
 
 // ThroughputSample represents a throughput measurement
@@ -315,7 +313,7 @@ func NewThroughputTester(interval time.Duration) *ThroughputTester {
 func (t *ThroughputTester) Run(duration time.Duration, fn func()) []ThroughputSample {
 	var ops atomic.Uint64
 	stop := make(chan struct{})
-	
+
 	// Start operation counter
 	go func() {
 		for {
@@ -328,28 +326,28 @@ func (t *ThroughputTester) Run(duration time.Duration, fn func()) []ThroughputSa
 			}
 		}
 	}()
-	
+
 	// Sample throughput
 	ticker := time.NewTicker(t.interval)
 	defer ticker.Stop()
-	
+
 	timeout := time.After(duration)
 	lastOps := uint64(0)
-	
+
 	for {
 		select {
 		case <-ticker.C:
 			currentOps := ops.Load()
 			deltaOps := currentOps - lastOps
 			lastOps = currentOps
-			
+
 			throughput := float64(deltaOps) / t.interval.Seconds()
 			t.samples = append(t.samples, ThroughputSample{
 				Time:       time.Now(),
 				Ops:        currentOps,
 				Throughput: throughput,
 			})
-			
+
 		case <-timeout:
 			close(stop)
 			return t.samples
@@ -360,10 +358,10 @@ func (t *ThroughputTester) Run(duration time.Duration, fn func()) []ThroughputSa
 // CompareBenchmarks compares two benchmark results
 func CompareBenchmarks(baseline, current BenchmarkResult) ComparisonResult {
 	return ComparisonResult{
-		Baseline:   baseline,
-		Current:    current,
-		OpsDelta:   int64(current.Ops) - int64(baseline.Ops),
-		OpsPercent: (float64(current.Ops) - float64(baseline.Ops)) / float64(baseline.Ops) * 100,
+		Baseline:     baseline,
+		Current:      current,
+		OpsDelta:     int64(current.Ops) - int64(baseline.Ops),
+		OpsPercent:   (float64(current.Ops) - float64(baseline.Ops)) / float64(baseline.Ops) * 100,
 		LatencyDelta: current.Latency - baseline.Latency,
 	}
 }
@@ -384,5 +382,3 @@ func (c ComparisonResult) String() string {
 		"  Latency: %v (delta: %v)",
 		c.OpsDelta, c.OpsPercent, c.Current.Latency, c.LatencyDelta)
 }
-
-

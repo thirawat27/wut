@@ -19,7 +19,7 @@ type BufferPool struct {
 func NewBufferPool() *BufferPool {
 	return &BufferPool{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return new(bytes.Buffer)
 			},
 		},
@@ -51,7 +51,7 @@ type StringPool struct {
 func NewStringPool() *StringPool {
 	return &StringPool{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return make([]byte, 0, 256)
 			},
 		},
@@ -82,7 +82,7 @@ type ObjectPool[T any] struct {
 func NewObjectPool[T any](newFunc func() T) *ObjectPool[T] {
 	return &ObjectPool[T]{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return newFunc()
 			},
 		},
@@ -183,7 +183,7 @@ type SlicePool[T any] struct {
 func NewSlicePool[T any](capacity int) *SlicePool[T] {
 	return &SlicePool[T]{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return make([]T, 0, capacity)
 			},
 		},

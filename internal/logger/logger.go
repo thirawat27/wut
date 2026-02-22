@@ -125,27 +125,27 @@ func Get() *Logger {
 }
 
 // Debug logs debug message
-func (l *Logger) Debug(msg string, keyvals ...interface{}) {
+func (l *Logger) Debug(msg string, keyvals ...any) {
 	l.logger.Debug(msg, keyvals...)
 }
 
 // Info logs info message
-func (l *Logger) Info(msg string, keyvals ...interface{}) {
+func (l *Logger) Info(msg string, keyvals ...any) {
 	l.logger.Info(msg, keyvals...)
 }
 
 // Warn logs warning message
-func (l *Logger) Warn(msg string, keyvals ...interface{}) {
+func (l *Logger) Warn(msg string, keyvals ...any) {
 	l.logger.Warn(msg, keyvals...)
 }
 
 // Error logs error message
-func (l *Logger) Error(msg string, keyvals ...interface{}) {
+func (l *Logger) Error(msg string, keyvals ...any) {
 	l.logger.Error(msg, keyvals...)
 }
 
 // Fatal logs fatal message and exits
-func (l *Logger) Fatal(msg string, keyvals ...interface{}) {
+func (l *Logger) Fatal(msg string, keyvals ...any) {
 	l.logger.Fatal(msg, keyvals...)
 }
 
@@ -173,27 +173,27 @@ func (l *Logger) Sync() error {
 // Convenience functions for global logger
 
 // Debug logs debug message using global logger
-func Debug(msg string, keyvals ...interface{}) {
+func Debug(msg string, keyvals ...any) {
 	Get().Debug(msg, keyvals...)
 }
 
 // Info logs info message using global logger
-func Info(msg string, keyvals ...interface{}) {
+func Info(msg string, keyvals ...any) {
 	Get().Info(msg, keyvals...)
 }
 
 // Warn logs warning message using global logger
-func Warn(msg string, keyvals ...interface{}) {
+func Warn(msg string, keyvals ...any) {
 	Get().Warn(msg, keyvals...)
 }
 
 // Error logs error message using global logger
-func Error(msg string, keyvals ...interface{}) {
+func Error(msg string, keyvals ...any) {
 	Get().Error(msg, keyvals...)
 }
 
 // Fatal logs fatal message using global logger
-func Fatal(msg string, keyvals ...interface{}) {
+func Fatal(msg string, keyvals ...any) {
 	Get().Fatal(msg, keyvals...)
 }
 
@@ -290,11 +290,11 @@ func (rw *rotatingWriter) rotate() error {
 	for i := rw.maxBackups - 1; i > 0; i-- {
 		old := rw.filename + fmt.Sprintf(".%d", i)
 		new := rw.filename + fmt.Sprintf(".%d", i+1)
-		os.Rename(old, new)
+		_ = os.Rename(old, new)
 	}
 
 	// Rename current file
-	os.Rename(rw.filename, rw.filename+".1")
+	_ = os.Rename(rw.filename, rw.filename+".1")
 
 	return rw.open()
 }

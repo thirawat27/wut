@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
+	"maps"
 	"net"
 	"net/http"
 	"net/http/httptrace"
@@ -133,7 +134,7 @@ type HTTPPool struct {
 func NewHTTPPool() *HTTPPool {
 	return &HTTPPool{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return NewFastHTTPClient()
 			},
 		},
@@ -159,7 +160,7 @@ type ResponseBufferPool struct {
 func NewResponseBufferPool(size int) *ResponseBufferPool {
 	return &ResponseBufferPool{
 		pool: sync.Pool{
-			New: func() interface{} {
+			New: func() any {
 				return make([]byte, size)
 			},
 		},
@@ -273,9 +274,7 @@ func (b *HTTPRequestBuilder) WithHeader(key, value string) *HTTPRequestBuilder {
 
 // WithHeaders adds multiple headers
 func (b *HTTPRequestBuilder) WithHeaders(headers map[string]string) *HTTPRequestBuilder {
-	for k, v := range headers {
-		b.headers[k] = v
-	}
+	maps.Copy(b.headers, headers)
 	return b
 }
 

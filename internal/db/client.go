@@ -15,15 +15,15 @@ import (
 const (
 	baseRawURL = "https://raw.githubusercontent.com/tldr-pages/tldr/main/pages"
 	// Platforms available in tldr-pages
-	PlatformCommon   = "common"
-	PlatformLinux    = "linux"
-	PlatformMacOS    = "osx"
-	PlatformWindows  = "windows"
-	PlatformSunOS    = "sunos"
-	PlatformAndroid  = "android"
-	PlatformFreeBSD  = "freebsd"
-	PlatformNetBSD   = "netbsd"
-	PlatformOpenBSD  = "openbsd"
+	PlatformCommon  = "common"
+	PlatformLinux   = "linux"
+	PlatformMacOS   = "osx"
+	PlatformWindows = "windows"
+	PlatformSunOS   = "sunos"
+	PlatformAndroid = "android"
+	PlatformFreeBSD = "freebsd"
+	PlatformNetBSD  = "netbsd"
+	PlatformOpenBSD = "openbsd"
 )
 
 // Client represents the TLDR API client
@@ -383,14 +383,14 @@ func (c *Client) parsePage(content, name, platform string) *Page {
 		}
 
 		// Title line (starts with #)
-		if strings.HasPrefix(line, "# ") {
-			page.Name = strings.TrimPrefix(line, "# ")
+		if after, ok := strings.CutPrefix(line, "# "); ok {
+			page.Name = after
 			continue
 		}
 
 		// Description line (starts with >)
-		if strings.HasPrefix(line, "> ") {
-			page.Description = strings.TrimPrefix(line, "> ")
+		if after, ok := strings.CutPrefix(line, "> "); ok {
+			page.Description = after
 			continue
 		}
 

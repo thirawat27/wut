@@ -1,5 +1,4 @@
 //go:build ignore
-// +build ignore
 
 // Build script for WUT
 // Usage: go run build.go [flags]
@@ -39,12 +38,12 @@ func main() {
 
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
-		
+
 		// Stop parsing flags after --
 		if arg == "--" {
 			break
 		}
-		
+
 		switch {
 		case arg == "-h" || arg == "--help":
 			printHelp()
@@ -126,7 +125,7 @@ func main() {
 		if verbose {
 			fmt.Printf("\nRunning: %s\n", output)
 		}
-		
+
 		// Collect args after -- to pass to the binary
 		var runArgs []string
 		doubleDashFound := false
@@ -137,7 +136,7 @@ func main() {
 				doubleDashFound = true
 			}
 		}
-		
+
 		runCmd := exec.Command(output, runArgs...)
 		runCmd.Stdout = os.Stdout
 		runCmd.Stderr = os.Stderr
@@ -154,14 +153,14 @@ func main() {
 		if verbose {
 			fmt.Printf("\nInstalling to: %s\n", installPath)
 		}
-		
+
 		// Copy file
 		src, err := os.ReadFile(output)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading binary: %v\n", err)
 			os.Exit(1)
 		}
-		
+
 		if err := os.WriteFile(installPath, src, 0755); err != nil {
 			// Try with sudo on Unix
 			if runtime.GOOS != "windows" {
@@ -177,7 +176,7 @@ func main() {
 				os.Exit(1)
 			}
 		}
-		
+
 		if verbose {
 			fmt.Printf("✓ Installed to: %s\n", installPath)
 		}
@@ -191,7 +190,7 @@ func getDefaultOutput() string {
 	if runtime.GOOS == "windows" {
 		ext = ".exe"
 	}
-	
+
 	subdir := ""
 	if runtime.GOOS == "windows" {
 		subdir = "windows"
@@ -200,7 +199,7 @@ func getDefaultOutput() string {
 	} else if runtime.GOOS == "linux" {
 		subdir = "linux"
 	}
-	
+
 	if subdir != "" {
 		return filepath.Join("build", subdir, "wut"+ext)
 	}
@@ -216,7 +215,7 @@ func getInstallPath() string {
 		}
 		return filepath.Join(os.Getenv("LOCALAPPDATA"), "WUT", "wut.exe")
 	}
-	
+
 	// Unix: prefer /usr/local/bin, fallback to ~/.local/bin
 	if _, err := os.Stat("/usr/local/bin"); err == nil {
 		return "/usr/local/bin/wut"
@@ -227,7 +226,7 @@ func getInstallPath() string {
 func getGitInfo() {
 	// Version is hardcoded - edit this when releasing new version
 	version = "v0.1.0"
-	
+
 	// Try to get commit hash
 	if out, err := exec.Command("git", "rev-parse", "--short", "HEAD").Output(); err == nil {
 		commit = strings.TrimSpace(string(out))

@@ -13,10 +13,10 @@ import (
 
 // SearchResult represents a search result
 type SearchResult struct {
-	ID       string
-	Score    float64
-	Data     interface{}
-	Matched  bool
+	ID      string
+	Score   float64
+	Data    any
+	Matched bool
 }
 
 // Searcher defines the search interface
@@ -26,20 +26,20 @@ type Searcher interface {
 
 // InvertedIndex provides fast full-text search
 type InvertedIndex struct {
-	mu       sync.RWMutex
-	index    map[string][]int64 // term -> document IDs
-	docs     map[int64]*IndexedDoc
-	nextID   atomic.Int64
+	mu        sync.RWMutex
+	index     map[string][]int64 // term -> document IDs
+	docs      map[int64]*IndexedDoc
+	nextID    atomic.Int64
 	tokenizer Tokenizer
 }
 
 // IndexedDoc represents an indexed document
 type IndexedDoc struct {
-	ID       int64
-	Content  string
-	Tokens   []string
-	Data     interface{}
-	AddedAt  time.Time
+	ID      int64
+	Content string
+	Tokens  []string
+	Data    any
+	AddedAt time.Time
 }
 
 // Tokenizer tokenizes text
@@ -65,9 +65,9 @@ func NewInvertedIndex() *InvertedIndex {
 }
 
 // AddDocument adds a document to the index
-func (idx *InvertedIndex) AddDocument(content string, data interface{}) int64 {
+func (idx *InvertedIndex) AddDocument(content string, data any) int64 {
 	id := idx.nextID.Add(1)
-	
+
 	tokens := idx.tokenizer.Tokenize(content)
 	doc := &IndexedDoc{
 		ID:      id,
@@ -175,10 +175,10 @@ type SearchCache struct {
 
 // CachedSearch represents cached search results
 type CachedSearch struct {
-	Query     string
-	Results   []SearchResult
-	CachedAt  time.Time
-	TTL       time.Duration
+	Query    string
+	Results  []SearchResult
+	CachedAt time.Time
+	TTL      time.Duration
 }
 
 // IsExpired checks if cache entry is expired
@@ -250,7 +250,7 @@ func (cs *ConcurrentSearcher) Search(ctx context.Context, query string, limitPer
 	errChan := make(chan error, len(cs.searchers))
 
 	var wg sync.WaitGroup
-	
+
 	// Limit concurrent searches
 	semaphore := make(chan struct{}, cs.workers)
 
@@ -258,7 +258,7 @@ func (cs *ConcurrentSearcher) Search(ctx context.Context, query string, limitPer
 		wg.Add(1)
 		go func(s Searcher) {
 			defer wg.Done()
-			
+
 			select {
 			case semaphore <- struct{}{}:
 				defer func() { <-semaphore }()
@@ -282,7 +282,7 @@ func (cs *ConcurrentSearcher) Search(ctx context.Context, query string, limitPer
 	// Collect results
 	var allResults []SearchResult
 	done := make(chan struct{})
-	
+
 	go func() {
 		for results := range resultsChan {
 			allResults = append(allResults, results...)
@@ -306,9 +306,9 @@ func (cs *ConcurrentSearcher) Search(ctx context.Context, query string, limitPer
 
 // Autocomplete provides fast autocomplete functionality
 type Autocomplete struct {
-	mu       sync.RWMutex
-	trie     *Trie
-	scores   map[string]int // usage scores
+	mu         sync.RWMutex
+	trie       *Trie
+	scores     map[string]int // usage scores
 	maxResults int
 }
 
@@ -348,7 +348,7 @@ func (ac *Autocomplete) Suggest(prefix string) []string {
 	defer ac.mu.RUnlock()
 
 	terms := ac.trie.FindWithPrefix(prefix)
-	
+
 	// Sort by score
 	sort.Slice(terms, func(i, j int) bool {
 		return ac.scores[terms[i]] > ac.scores[terms[j]]
@@ -374,7 +374,7 @@ type SearchMetrics struct {
 func (m *SearchMetrics) RecordQuery(latency time.Duration, cacheHit bool) {
 	m.Queries.Add(1)
 	m.TotalLatency.Add(int64(latency))
-	
+
 	// Update average
 	queries := m.Queries.Load()
 	total := m.TotalLatency.Load()
@@ -456,7 +456,7 @@ type StoredDocument struct {
 	Title     string
 	Content   string
 	Tags      []string
-	Data      interface{}
+	Data      any
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

@@ -43,27 +43,27 @@ func HiBlack(s string) string {
 }
 
 // Greenf returns a formatted green-colored string
-func Greenf(format string, a ...interface{}) string {
+func Greenf(format string, a ...any) string {
 	return Green(fmt.Sprintf(format, a...))
 }
 
 // Redf returns a formatted red-colored string
-func Redf(format string, a ...interface{}) string {
+func Redf(format string, a ...any) string {
 	return Red(fmt.Sprintf(format, a...))
 }
 
 // Yellowf returns a formatted yellow-colored string
-func Yellowf(format string, a ...interface{}) string {
+func Yellowf(format string, a ...any) string {
 	return Yellow(fmt.Sprintf(format, a...))
 }
 
 // Cyanf returns a formatted cyan-colored string
-func Cyanf(format string, a ...interface{}) string {
+func Cyanf(format string, a ...any) string {
 	return Cyan(fmt.Sprintf(format, a...))
 }
 
 // HiBlackf returns a formatted high-intensity black (gray) colored string
-func HiBlackf(format string, a ...interface{}) string {
+func HiBlackf(format string, a ...any) string {
 	return HiBlack(fmt.Sprintf(format, a...))
 }
 

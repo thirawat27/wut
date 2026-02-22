@@ -13,8 +13,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
-	"wut/internal/logger"
 	"wut/internal/db"
+	"wut/internal/logger"
 )
 
 // suggestCmd represents the suggest command

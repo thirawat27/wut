@@ -15,9 +15,9 @@ import (
 
 // SyncManager manages syncing TLDR pages to local storage
 type SyncManager struct {
-	client    *Client
-	storage   *Storage
-	log       *logger.Logger
+	client     *Client
+	storage    *Storage
+	log        *logger.Logger
 	workerPool *concurrency.Pool
 }
 
@@ -172,10 +172,7 @@ func (sm *SyncManager) SyncCommandsBatch(ctx context.Context, commands []string,
 	start := time.Now()
 
 	for i := 0; i < len(commands); i += batchSize {
-		end := i + batchSize
-		if end > len(commands) {
-			end = len(commands)
-		}
+		end := min(i+batchSize, len(commands))
 
 		batch := commands[i:end]
 		sm.log.Debug("processing batch", "batch", i/batchSize+1, "commands", len(batch))

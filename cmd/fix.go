@@ -25,9 +25,9 @@ WUT will detect typos, dangerous commands, and suggest alternatives.`,
 }
 
 var (
-	fixCopy  bool
-	fixList  bool
-	fixSafe  bool
+	fixCopy bool
+	fixList bool
+	fixSafe bool
 )
 
 func init() {
@@ -158,18 +158,18 @@ func displayCorrection(c *corrector.Correction) {
 
 func listCommonTypos() error {
 	typos := map[string]string{
-		"gti":        "git",
-		"gi":         "git",
-		"sl":         "ls",
-		"cd..":       "cd ..",
-		"grpe":       "grep",
-		"docer":      "docker",
-		"doker":      "docker",
-		"npn":        "npm",
-		"pthon":      "python",
-		"gut":        "git",
-		"mkr":        "mkdir",
-		"gr":         "grep",
+		"gti":   "git",
+		"gi":    "git",
+		"sl":    "ls",
+		"cd..":  "cd ..",
+		"grpe":  "grep",
+		"docer": "docker",
+		"doker": "docker",
+		"npn":   "npm",
+		"pthon": "python",
+		"gut":   "git",
+		"mkr":   "mkdir",
+		"gr":    "grep",
 	}
 
 	headerStyle := lipgloss.NewStyle().

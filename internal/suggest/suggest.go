@@ -97,10 +97,7 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.HistoryEntry) []
 		} else {
 			// Fuzzy match - calculate Levenshtein distance
 			distance := levenshtein.ComputeDistance(query, cmdLower)
-			maxLen := len(query)
-			if len(cmdLower) > maxLen {
-				maxLen = len(cmdLower)
-			}
+			maxLen := max(len(cmdLower), len(query))
 			if maxLen > 0 && distance <= maxLen/2 {
 				// Similar enough - give it a score
 				similarity := 1.0 - float64(distance)/float64(maxLen)

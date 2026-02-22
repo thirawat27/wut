@@ -6,7 +6,7 @@ import (
 )
 
 // Errorf creates a formatted error (wrapper for fmt.Errorf)
-func Errorf(format string, args ...interface{}) error {
+func Errorf(format string, args ...any) error {
 	return fmt.Errorf(format, args...)
 }
 
@@ -26,8 +26,10 @@ func MustValue[T any](v T, err error) T {
 }
 
 // Ptr returns pointer to value
+//
+//go:fix inline
 func Ptr[T any](v T) *T {
-	return &v
+	return new(v)
 }
 
 // Deref dereferences pointer with default

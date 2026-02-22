@@ -13,8 +13,8 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
-	appctx "wut/internal/context"
 	"wut/internal/alias"
+	appctx "wut/internal/context"
 	"wut/internal/ui"
 )
 
@@ -58,9 +58,7 @@ func runAlias(cmd *cobra.Command, args []string) error {
 	}
 
 	manager := alias.NewManager(shell)
-	if err := manager.Load(); err != nil {
-		// Non-fatal, might be first run
-	}
+	_ = manager.Load() // Non-fatal, might be first run
 
 	// Generate smart aliases
 	if aliasGenerate {
@@ -222,5 +220,3 @@ func detectShellForAlias() string {
 	// Default to bash
 	return "bash"
 }
-
-

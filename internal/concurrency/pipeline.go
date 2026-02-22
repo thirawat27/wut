@@ -55,11 +55,11 @@ func NewPipeline[T any](opts ...PipelineOption[T]) *Pipeline[T] {
 		workers: runtime.NumCPU(),
 		buffer:  100,
 	}
-	
+
 	for _, opt := range opts {
 		opt(p)
 	}
-	
+
 	return p
 }
 
@@ -79,31 +79,31 @@ func (p *Pipeline[T]) Process(ctx context.Context, items []T) ([]T, error) {
 	if len(items) == 0 {
 		return []T{}, nil
 	}
-	
+
 	if len(p.stages) == 0 {
 		return items, nil
 	}
-	
+
 	// Create channels for each stage
 	channels := make([]chan T, len(p.stages)+1)
 	errChan := make(chan error, len(items))
-	
+
 	for i := range channels {
 		channels[i] = make(chan T, p.buffer)
 	}
-	
+
 	// Start each stage
 	var wg sync.WaitGroup
-	
+
 	for i, stage := range p.stages {
 		inputChan := channels[i]
 		outputChan := channels[i+1]
-		
+
 		for w := 0; w < p.workers; w++ {
 			wg.Add(1)
 			go func(s Stage[T], in <-chan T, out chan<- T) {
 				defer wg.Done()
-				
+
 				for {
 					select {
 					case <-ctx.Done():
@@ -112,7 +112,7 @@ func (p *Pipeline[T]) Process(ctx context.Context, items []T) ([]T, error) {
 						if !ok {
 							return
 						}
-						
+
 						result, err := s.Process(ctx, item)
 						if err != nil {
 							select {
@@ -122,7 +122,7 @@ func (p *Pipeline[T]) Process(ctx context.Context, items []T) ([]T, error) {
 							}
 							continue
 						}
-						
+
 						select {
 						case out <- result:
 						case <-ctx.Done():
@@ -133,7 +133,7 @@ func (p *Pipeline[T]) Process(ctx context.Context, items []T) ([]T, error) {
 			}(stage, inputChan, outputChan)
 		}
 	}
-	
+
 	// Send input items with sync.Once to ensure channel is closed only once
 	var closeOnce sync.Once
 	go func() {
@@ -146,34 +146,34 @@ func (p *Pipeline[T]) Process(ctx context.Context, items []T) ([]T, error) {
 			}
 		}
 	}()
-	
+
 	// Collect results
 	results := make([]T, 0, len(items))
 	resultDone := make(chan struct{})
-	
+
 	go func() {
 		defer close(resultDone)
 		for result := range channels[len(p.stages)] {
 			results = append(results, result)
 		}
 	}()
-	
+
 	// Wait for completion
 	wg.Wait()
 	close(channels[len(p.stages)])
 	<-resultDone
 	close(errChan)
-	
+
 	// Check for errors
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
-	
+
 	if len(errs) > 0 {
 		return results, fmt.Errorf("pipeline completed with %d errors", len(errs))
 	}
-	
+
 	return results, nil
 }
 
@@ -192,7 +192,7 @@ func NewParallelPipeline[T any](merger func([]T) ([]T, error)) *ParallelPipeline
 			return merged, nil
 		}
 	}
-	
+
 	return &ParallelPipeline[T]{
 		pipelines: make([]*Pipeline[T], 0),
 		merger:    merger,
@@ -210,17 +210,17 @@ func (pp *ParallelPipeline[T]) Process(ctx context.Context, items []T) ([]T, err
 	if len(pp.pipelines) == 0 {
 		return items, nil
 	}
-	
+
 	// Process through all pipelines concurrently
 	results := make([][]T, len(pp.pipelines))
 	errChan := make(chan error, len(pp.pipelines))
-	
+
 	var wg sync.WaitGroup
 	for i, pipeline := range pp.pipelines {
 		wg.Add(1)
 		go func(idx int, p *Pipeline[T]) {
 			defer wg.Done()
-			
+
 			result, err := p.Process(ctx, items)
 			if err != nil {
 				errChan <- err
@@ -229,21 +229,21 @@ func (pp *ParallelPipeline[T]) Process(ctx context.Context, items []T) ([]T, err
 			results[idx] = result
 		}(i, pipeline)
 	}
-	
+
 	wg.Wait()
 	close(errChan)
-	
+
 	// Check for errors
 	for err := range errChan {
 		return nil, err
 	}
-	
+
 	// Flatten results for merger
 	var flattened []T
 	for _, r := range results {
 		flattened = append(flattened, r...)
 	}
-	
+
 	return pp.merger(flattened)
 }
 
@@ -266,19 +266,16 @@ func (bp *BatchProcessor[T]) Process(ctx context.Context, items []T) error {
 	if len(items) == 0 {
 		return nil
 	}
-	
+
 	for i := 0; i < len(items); i += bp.batchSize {
-		end := i + bp.batchSize
-		if end > len(items) {
-			end = len(items)
-		}
-		
+		end := min(i+bp.batchSize, len(items))
+
 		batch := items[i:end]
 		if err := bp.processor(ctx, batch); err != nil {
 			return fmt.Errorf("batch %d failed: %w", i/bp.batchSize, err)
 		}
 	}
-	
+
 	return nil
 }
 
@@ -287,21 +284,18 @@ func (bp *BatchProcessor[T]) ProcessConcurrent(ctx context.Context, items []T, w
 	if len(items) == 0 {
 		return nil
 	}
-	
+
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	
+
 	// Create batches
 	var batches [][]T
 	for i := 0; i < len(items); i += bp.batchSize {
-		end := i + bp.batchSize
-		if end > len(items) {
-			end = len(items)
-		}
+		end := min(i+bp.batchSize, len(items))
 		batches = append(batches, items[i:end])
 	}
-	
+
 	// Process batches concurrently
 	return ForEach(ctx, batches, func(batch []T) error {
 		return bp.processor(ctx, batch)
@@ -327,18 +321,16 @@ func (fo *FanOut[T]) Process(ctx context.Context, items []T) error {
 	if len(items) == 0 {
 		return nil
 	}
-	
+
 	itemChan := make(chan T, fo.workers)
 	errChan := make(chan error, len(items))
-	
+
 	var wg sync.WaitGroup
-	
+
 	// Start workers
 	for i := 0; i < fo.workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			
+		wg.Go(func() {
+
 			for {
 				select {
 				case <-ctx.Done():
@@ -347,15 +339,15 @@ func (fo *FanOut[T]) Process(ctx context.Context, items []T) error {
 					if !ok {
 						return
 					}
-					
+
 					if err := fo.handler(ctx, item); err != nil {
 						errChan <- err
 					}
 				}
 			}
-		}()
+		})
 	}
-	
+
 	// Send items
 	go func() {
 		defer close(itemChan)
@@ -367,21 +359,21 @@ func (fo *FanOut[T]) Process(ctx context.Context, items []T) error {
 			}
 		}
 	}()
-	
+
 	// Wait for completion
 	wg.Wait()
 	close(errChan)
-	
+
 	// Check for errors
 	var errs []error
 	for err := range errChan {
 		errs = append(errs, err)
 	}
-	
+
 	if len(errs) > 0 {
 		return fmt.Errorf("fan-out completed with %d errors", len(errs))
 	}
-	
+
 	return nil
 }
 
@@ -406,14 +398,14 @@ func (fi *FanIn[T]) AddInput(ch <-chan T) *FanIn[T] {
 // Merge merges all input channels into one output channel
 func (fi *FanIn[T]) Merge(ctx context.Context) <-chan T {
 	output := make(chan T, len(fi.inputs))
-	
+
 	var wg sync.WaitGroup
-	
+
 	for _, input := range fi.inputs {
 		wg.Add(1)
 		go func(ch <-chan T) {
 			defer wg.Done()
-			
+
 			for {
 				select {
 				case <-ctx.Done():
@@ -422,7 +414,7 @@ func (fi *FanIn[T]) Merge(ctx context.Context) <-chan T {
 					if !ok {
 						return
 					}
-					
+
 					select {
 					case output <- item:
 					case <-ctx.Done():
@@ -432,12 +424,12 @@ func (fi *FanIn[T]) Merge(ctx context.Context) <-chan T {
 			}
 		}(input)
 	}
-	
+
 	go func() {
 		wg.Wait()
 		close(output)
 	}()
-	
+
 	return output
 }
 
@@ -461,10 +453,10 @@ func NewStream[T any](ch <-chan T) *Stream[T] {
 // Map applies a function to each item in the stream
 func (s *Stream[T]) Map(fn func(T) (T, error)) *Stream[T] {
 	output := make(chan T)
-	
+
 	go func() {
 		defer close(output)
-		
+
 		for {
 			select {
 			case <-s.ctx.Done():
@@ -473,12 +465,12 @@ func (s *Stream[T]) Map(fn func(T) (T, error)) *Stream[T] {
 				if !ok {
 					return
 				}
-				
+
 				result, err := fn(item)
 				if err != nil {
 					continue // Skip failed items
 				}
-				
+
 				select {
 				case output <- result:
 				case <-s.ctx.Done():
@@ -487,17 +479,17 @@ func (s *Stream[T]) Map(fn func(T) (T, error)) *Stream[T] {
 			}
 		}
 	}()
-	
+
 	return NewStream(output)
 }
 
 // Filter filters items in the stream
 func (s *Stream[T]) Filter(predicate func(T) bool) *Stream[T] {
 	output := make(chan T)
-	
+
 	go func() {
 		defer close(output)
-		
+
 		for {
 			select {
 			case <-s.ctx.Done():
@@ -506,7 +498,7 @@ func (s *Stream[T]) Filter(predicate func(T) bool) *Stream[T] {
 				if !ok {
 					return
 				}
-				
+
 				if predicate(item) {
 					select {
 					case output <- item:
@@ -517,7 +509,7 @@ func (s *Stream[T]) Filter(predicate func(T) bool) *Stream[T] {
 			}
 		}
 	}()
-	
+
 	return NewStream(output)
 }
 
@@ -533,7 +525,7 @@ func (s *Stream[T]) Collect() []T {
 // CollectWithContext collects items from the stream with context
 func (s *Stream[T]) CollectWithContext(ctx context.Context) []T {
 	var results []T
-	
+
 	for {
 		select {
 		case <-ctx.Done():

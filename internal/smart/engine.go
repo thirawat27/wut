@@ -22,21 +22,21 @@ type Engine struct {
 	ctxCache     *performance.LRUCache[string, *appctx.Context]
 	index        *performance.InvertedIndex
 	autocomplete *performance.Autocomplete
-	
+
 	// Scoring weights
 	weights ScoringWeights
-	
+
 	mu sync.RWMutex
 }
 
 // ScoringWeights holds scoring weights for ranking
 type ScoringWeights struct {
-	ExactMatch     float64
-	PrefixMatch    float64
-	ContainsMatch  float64
-	FuzzyMatch     float64
-	HistoryFreq    float64
-	Recency        float64
+	ExactMatch       float64
+	PrefixMatch      float64
+	ContainsMatch    float64
+	FuzzyMatch       float64
+	HistoryFreq      float64
+	Recency          float64
 	ContextRelevance float64
 }
 
@@ -55,15 +55,15 @@ func DefaultScoringWeights() ScoringWeights {
 
 // Suggestion represents a command suggestion
 type Suggestion struct {
-	Command         string
-	Description     string
-	Score           float64
-	Source          string
-	Icon            string
-	UsageCount      int
-	LastUsed        time.Time
-	ContextMatch    float64
-	IsPerfectMatch  bool
+	Command        string
+	Description    string
+	Score          float64
+	Source         string
+	Icon           string
+	UsageCount     int
+	LastUsed       time.Time
+	ContextMatch   float64
+	IsPerfectMatch bool
 }
 
 // NewEngine creates a new smart engine
@@ -103,44 +103,36 @@ func (e *Engine) Suggest(ctx context.Context, query string, contextData *appctx.
 	var wg sync.WaitGroup
 
 	// 1. History-based suggestions
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		select {
 		case suggestionChan <- e.getHistorySuggestions(ctx, query, limit):
 		case <-ctx.Done():
 		}
-	}()
+	})
 
 	// 2. Context-specific suggestions
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		select {
 		case suggestionChan <- e.getContextSuggestions(contextData, query):
 		case <-ctx.Done():
 		}
-	}()
+	})
 
 	// 3. Common workflow suggestions
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		select {
 		case suggestionChan <- e.getWorkflowSuggestions(contextData, query):
 		case <-ctx.Done():
 		}
-	}()
+	})
 
 	// 4. Fuzzy matched suggestions
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		select {
 		case suggestionChan <- e.getFuzzySuggestions(query, limit):
 		case <-ctx.Done():
 		}
-	}()
+	})
 
 	// Close channel when done
 	go func() {
@@ -196,14 +188,14 @@ func (e *Engine) getHistorySuggestions(ctx context.Context, query string, limit 
 	if e.storage == nil {
 		return nil
 	}
-	
+
 	// Check context before database call
 	select {
 	case <-ctx.Done():
 		return nil
 	default:
 	}
-	
+
 	// Use smaller limit for faster response
 	historyLimit := 100
 	if limit > 0 && limit < 100 {
@@ -231,7 +223,7 @@ func (e *Engine) getHistorySuggestions(ctx context.Context, query string, limit 
 			default:
 			}
 		}
-		
+
 		score := e.calculateHistoryScore(entry, query, now)
 		if score > 0 {
 			suggestions = append(suggestions, Suggestion{
@@ -509,10 +501,10 @@ func (e *Engine) GetFallbackSuggestions(ctx *appctx.Context, limit int) []Sugges
 	if limit <= 0 {
 		limit = 10
 	}
-	
+
 	// Always provide context-based suggestions as fallback
 	suggestions := e.getContextSuggestions(ctx, "")
-	
+
 	// If still empty, provide generic suggestions
 	if len(suggestions) == 0 {
 		suggestions = []Suggestion{
@@ -522,7 +514,7 @@ func (e *Engine) GetFallbackSuggestions(ctx *appctx.Context, limit int) []Sugges
 			{Command: "clear", Description: "Clear the screen", Source: "📌 Common", Icon: "🧹", Score: 0.9},
 		}
 	}
-	
+
 	// Add git commands if in git repo
 	if ctx.IsGitRepo {
 		suggestions = append([]Suggestion{
@@ -531,14 +523,16 @@ func (e *Engine) GetFallbackSuggestions(ctx *appctx.Context, limit int) []Sugges
 			{Command: "git commit -m \"message\"", Description: "Commit changes", Source: "🎯 Context", Icon: "💾", Score: 1.3},
 		}, suggestions...)
 	}
-	
+
 	return e.limitSuggestions(suggestions, limit)
 }
 
 // Preload preloads suggestions into cache
 func (e *Engine) Preload(ctx context.Context, ctxData *appctx.Context) {
 	// Preload empty query suggestions
-	go e.Suggest(ctx, "", ctxData, 20)
+	go func() {
+		_, _ = e.Suggest(ctx, "", ctxData, 20)
+	}()
 }
 
 // ClearCache clears the suggestion cache

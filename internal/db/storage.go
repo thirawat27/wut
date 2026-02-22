@@ -17,8 +17,8 @@ const (
 
 // Storage provides local storage for TLDR pages
 type Storage struct {
-	db     *bbolt.DB
-	path   string
+	db   *bbolt.DB
+	path string
 }
 
 // StoredPage represents a TLDR page stored locally
@@ -33,9 +33,9 @@ type StoredPage struct {
 
 // Metadata stores sync information
 type Metadata struct {
-	LastSync    time.Time `json:"last_sync"`
-	TotalPages  int       `json:"total_pages"`
-	Platforms   []string  `json:"platforms"`
+	LastSync   time.Time `json:"last_sync"`
+	TotalPages int       `json:"total_pages"`
+	Platforms  []string  `json:"platforms"`
 }
 
 // NewStorage creates a new TLDR storage
@@ -166,7 +166,7 @@ func (s *Storage) IsPageStale(name, platform string, maxAge time.Duration) bool 
 	key := fmt.Sprintf("%s/%s", platform, name)
 	isStale := true
 
-	s.db.View(func(tx *bbolt.Tx) error {
+	_ = s.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(tldrBucketName))
 		data := bucket.Get([]byte(key))
 		if data == nil {
@@ -277,8 +277,8 @@ func (s *Storage) GetMetadata() (*Metadata, error) {
 }
 
 // GetStats returns storage statistics
-func (s *Storage) GetStats() (map[string]interface{}, error) {
-	stats := map[string]interface{}{
+func (s *Storage) GetStats() (map[string]any, error) {
+	stats := map[string]any{
 		"total_pages": 0,
 		"platforms":   map[string]int{},
 	}
@@ -318,16 +318,16 @@ func (s *Storage) SearchLocal(query string) ([]StoredPage, error) {
 	}
 
 	for _, page := range pages {
-		nameLower := ""
+		var nameLower strings.Builder
 		for _, r := range page.Name {
-			nameLower += string(r | 32)
+			nameLower.WriteString(string(r | 32))
 		}
-		descLower := ""
+		var descLower strings.Builder
 		for _, r := range page.Description {
-			descLower += string(r | 32)
+			descLower.WriteString(string(r | 32))
 		}
 
-		if contains(nameLower, queryLower) || contains(descLower, queryLower) {
+		if contains(nameLower.String(), queryLower) || contains(descLower.String(), queryLower) {
 			results = append(results, page)
 		}
 	}

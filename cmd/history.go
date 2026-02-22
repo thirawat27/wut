@@ -164,23 +164,23 @@ func printHistoryEntry(index int, entry db.HistoryEntry) {
 		Foreground(lipgloss.Color("#6B7280")).
 		Width(4).
 		Align(lipgloss.Right)
-	
+
 	// Command style
 	cmdStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#10B981"))
-	
+
 	// Meta style
 	metaStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("#9CA3AF"))
 
 	// Print command
-	fmt.Printf("%s  %s\n", 
+	fmt.Printf("%s  %s\n",
 		indexStyle.Render(fmt.Sprintf("%d.", index)),
 		cmdStyle.Render(entry.Command))
 
 	// Print metadata
-	meta := fmt.Sprintf("Used: %d times | Last: %s", 
+	meta := fmt.Sprintf("Used: %d times | Last: %s",
 		entry.UsageCount,
 		entry.LastUsed.Format("2006-01-02 15:04"))
 	fmt.Printf("     %s\n", metaStyle.Render(meta))
@@ -196,7 +196,7 @@ func printHistoryEntry(index int, entry db.HistoryEntry) {
 func searchHistoryOptimized(storage *db.Storage, query string, limit int) ([]db.HistoryEntry, error) {
 	// Use fast fuzzy matching for search
 	matcher := performance.NewFastMatcher(false, 0.3, 3)
-	
+
 	// Get all entries
 	entries, err := storage.GetHistory(context.Background(), 10000)
 	if err != nil {
@@ -429,16 +429,16 @@ func readShellHistory(shellType, path string) ([]string, error) {
 	case "fish":
 		// Fish history format: - cmd: <command>
 		for _, line := range lines {
-			if strings.HasPrefix(line, "- cmd: ") {
-				cmd := strings.TrimPrefix(line, "- cmd: ")
+			if after, ok := strings.CutPrefix(line, "- cmd: "); ok {
+				cmd := after
 				commands = append(commands, cmd)
 			}
 		}
 	case "zsh":
 		// Zsh history may have timestamps: : timestamp:elapsed;command
 		for _, line := range lines {
-			if idx := strings.Index(line, ";"); idx != -1 {
-				commands = append(commands, line[idx+1:])
+			if _, after, ok := strings.Cut(line, ";"); ok {
+				commands = append(commands, after)
 			} else if line != "" {
 				commands = append(commands, line)
 			}

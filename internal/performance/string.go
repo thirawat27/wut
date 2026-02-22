@@ -254,7 +254,7 @@ func FastRepeat(s string, count int) string {
 	}
 
 	buf := make([]byte, 0, maxLen)
-	for i := 0; i < count; i++ {
+	for range count {
 		buf = append(buf, s...)
 	}
 	return string(buf)

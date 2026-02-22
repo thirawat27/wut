@@ -30,84 +30,84 @@ var (
 	mutedColor     = lipgloss.Color("#6B7280") // Gray
 	textColor      = lipgloss.Color("#F3F4F6") // Light gray
 	bgColor        = lipgloss.Color("#1F2937") // Dark gray
-	
+
 	// Title styles
 	titleStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(primaryColor).
-		Background(bgColor).
-		Padding(0, 1).
-		MarginBottom(1)
-	
+			Bold(true).
+			Foreground(primaryColor).
+			Background(bgColor).
+			Padding(0, 1).
+			MarginBottom(1)
+
 	// Command name style
 	commandStyle = lipgloss.NewStyle().
-		Bold(true).
-		Foreground(secondaryColor).
-		Background(lipgloss.Color("#064E3B")).
-		Padding(0, 1)
-	
+			Bold(true).
+			Foreground(secondaryColor).
+			Background(lipgloss.Color("#064E3B")).
+			Padding(0, 1)
+
 	// Description style
 	descriptionStyle = lipgloss.NewStyle().
-		Foreground(textColor).
-		Italic(true)
-	
+				Foreground(textColor).
+				Italic(true)
+
 	// Example description style
 	exampleDescStyle = lipgloss.NewStyle().
-		Foreground(accentColor)
-	
+				Foreground(accentColor)
+
 	// Command example style
 	exampleCmdStyle = lipgloss.NewStyle().
-		Foreground(textColor).
-		Background(lipgloss.Color("#374151")).
-		Padding(0, 1).
-		MarginLeft(2)
-	
+			Foreground(textColor).
+			Background(lipgloss.Color("#374151")).
+			Padding(0, 1).
+			MarginLeft(2)
+
 	// Selected example style
 	selectedExampleStyle = lipgloss.NewStyle().
-		Foreground(textColor).
-		Background(lipgloss.Color("#4B5563")).
-		Padding(0, 1).
-		MarginLeft(2).
-		Bold(true)
-	
+				Foreground(textColor).
+				Background(lipgloss.Color("#4B5563")).
+				Padding(0, 1).
+				MarginLeft(2).
+				Bold(true)
+
 	// Platform badge style
 	platformStyle = lipgloss.NewStyle().
-		Foreground(bgColor).
-		Background(infoColor).
-		Padding(0, 1).
-		Bold(true)
-	
+			Foreground(bgColor).
+			Background(infoColor).
+			Padding(0, 1).
+			Bold(true)
+
 	// Search input style
 	inputStyle = lipgloss.NewStyle().
-		Foreground(textColor).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(primaryColor).
-		Padding(0, 1)
-	
+			Foreground(textColor).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(primaryColor).
+			Padding(0, 1)
+
 	// Help style
 	helpStyle = lipgloss.NewStyle().
-		Foreground(mutedColor).
-		MarginTop(1)
-	
+			Foreground(mutedColor).
+			MarginTop(1)
+
 	// Border styles
 	boxStyle = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(primaryColor).
-		Padding(0, 1)
-	
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(primaryColor).
+			Padding(0, 1)
+
 	// Notification style
 	notificationStyle = lipgloss.NewStyle().
-		Foreground(bgColor).
-		Background(secondaryColor).
-		Padding(0, 1).
-		Bold(true)
+				Foreground(bgColor).
+				Background(secondaryColor).
+				Padding(0, 1).
+				Bold(true)
 )
 
 // DBItem represents an item in the list
 type DBItem struct {
-	Page        *Page
-	ItemTitle   string
-	ItemDesc    string
+	Page      *Page
+	ItemTitle string
+	ItemDesc  string
 }
 
 // FilterValue implements list.Item interface
@@ -155,17 +155,17 @@ func NewModel() *Model {
 	input.Focus()
 	input.CharLimit = 50
 	input.Width = 50
-	
+
 	// Setup list
 	items := []list.Item{}
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Database - Command Cheat Sheets"
 	l.SetShowHelp(false)
 	l.SetFilteringEnabled(false)
-	
+
 	// Setup viewport
 	vp := viewport.New(0, 0)
-	
+
 	return &Model{
 		client:          NewClient(),
 		input:           input,
@@ -200,7 +200,7 @@ func (m *Model) Init() tea.Cmd {
 // Update handles messages
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
-	
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -208,20 +208,20 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.list.SetSize(msg.Width, msg.Height-8)
 		m.viewport.Width = msg.Width - 4
 		m.viewport.Height = msg.Height - 10
-		
+
 	case tea.KeyMsg:
 		// Global keys
 		switch msg.String() {
 		case "ctrl+c":
 			return m, tea.Quit
 		}
-		
+
 		// Mode-specific keys
 		if m.mode == "search" {
 			switch msg.String() {
 			case "esc":
 				return m, tea.Quit
-				
+
 			case "enter":
 				query := strings.TrimSpace(m.input.Value())
 				if query != "" {
@@ -246,7 +246,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.showPage(item.Page.Name)
 					}
 				}
-				
+
 			case "/":
 				m.input.Focus()
 			}
@@ -257,19 +257,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.currentPage = nil
 				m.selectedExample = 0
 				return m, nil
-				
+
 			case "j", "down":
 				if m.selectedExample < m.totalExamples-1 {
 					m.selectedExample++
 					m.viewport.SetContent(m.renderPage(m.currentPage))
 				}
-				
+
 			case "k", "up":
 				if m.selectedExample > 0 {
 					m.selectedExample--
 					m.viewport.SetContent(m.renderPage(m.currentPage))
 				}
-				
+
 			case "c", "y":
 				// Copy current example to clipboard
 				if m.currentPage != nil && m.selectedExample < len(m.currentPage.Examples) {
@@ -278,7 +278,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.showNotification("📋 Copied to clipboard!")
 					}
 				}
-				
+
 			case "e", "enter":
 				// Execute current example
 				if m.currentPage != nil && m.selectedExample < len(m.currentPage.Examples) {
@@ -286,7 +286,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.executedCmd = cmd
 					return m, tea.Quit
 				}
-				
+
 			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 				// Jump to example number
 				num := int(msg.Runes[0] - '1')
@@ -296,7 +296,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		
+
 	case pageLoadedMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -309,7 +309,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetContent(m.renderPage(msg.page))
 		}
 		return m, nil
-		
+
 	case searchResultsMsg:
 		m.loading = false
 		if msg.err != nil {
@@ -327,7 +327,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.SetItems(items)
 		}
 		return m, nil
-		
+
 	case tickMsg:
 		if m.notificationTime > 0 {
 			m.notificationTime--
@@ -337,19 +337,19 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, m.tick()
 		}
 	}
-	
+
 	// Update components based on mode
 	if m.mode == "search" {
 		// Update input
 		newInput, inputCmd := m.input.Update(msg)
 		m.input = newInput
 		cmds = append(cmds, inputCmd)
-		
+
 		// Update list
 		newList, listCmd := m.list.Update(msg)
 		m.list = newList
 		cmds = append(cmds, listCmd)
-		
+
 		// Real-time search on input change
 		if _, ok := msg.(tea.KeyMsg); ok {
 			query := strings.TrimSpace(m.input.Value())
@@ -363,7 +363,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport = newViewport
 		cmds = append(cmds, vpCmd)
 	}
-	
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -372,7 +372,7 @@ func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "Loading..."
 	}
-	
+
 	if m.mode == "search" {
 		return m.searchView()
 	}
@@ -382,23 +382,23 @@ func (m *Model) View() string {
 // searchView renders the search mode
 func (m *Model) searchView() string {
 	var b strings.Builder
-	
+
 	// Title
 	title := titleStyle.Render("🔍 Database - Command Cheat Sheets")
 	b.WriteString(title)
 	b.WriteString("\n")
-	
+
 	// Search input
 	inputBox := inputStyle.Render(m.input.View())
 	b.WriteString(inputBox)
 	b.WriteString("\n")
-	
+
 	// Loading indicator
 	if m.loading {
 		b.WriteString("⏳ Searching...")
 		b.WriteString("\n")
 	}
-	
+
 	// Error message
 	if m.err != nil {
 		errMsg := lipgloss.NewStyle().
@@ -407,15 +407,15 @@ func (m *Model) searchView() string {
 		b.WriteString(errMsg)
 		b.WriteString("\n")
 	}
-	
+
 	// List
 	b.WriteString(m.list.View())
-	
+
 	// Help
 	help := helpStyle.Render("enter: view • /: search • esc/q: quit")
 	b.WriteString("\n")
 	b.WriteString(help)
-	
+
 	return b.String()
 }
 
@@ -424,9 +424,9 @@ func (m *Model) detailView() string {
 	if m.currentPage == nil {
 		return "Loading..."
 	}
-	
+
 	var b strings.Builder
-	
+
 	// Header with back button and command name
 	header := lipgloss.JoinHorizontal(
 		lipgloss.Left,
@@ -437,14 +437,14 @@ func (m *Model) detailView() string {
 	)
 	b.WriteString(header)
 	b.WriteString("\n")
-	
+
 	// Description
 	if m.currentPage.Description != "" {
 		desc := descriptionStyle.Render(m.currentPage.Description)
 		b.WriteString(desc)
 		b.WriteString("\n")
 	}
-	
+
 	// Examples
 	if len(m.currentPage.Examples) > 0 {
 		b.WriteString(lipgloss.NewStyle().
@@ -452,7 +452,7 @@ func (m *Model) detailView() string {
 			Foreground(primaryColor).
 			Render("Examples:"))
 		b.WriteString("\n")
-		
+
 		for i, ex := range m.currentPage.Examples {
 			// Number with selection indicator
 			numStyle := lipgloss.NewStyle().
@@ -461,17 +461,17 @@ func (m *Model) detailView() string {
 				numStyle = numStyle.Bold(true).Foreground(accentColor)
 			}
 			num := numStyle.Render(fmt.Sprintf("%d.", i+1))
-			
+
 			// Description
 			desc := exampleDescStyle.Render(ex.Description)
-			
+
 			// Command with selection highlight
 			cmdStyle := exampleCmdStyle
 			if i == m.selectedExample {
 				cmdStyle = selectedExampleStyle
 			}
 			cmd := cmdStyle.Render(ex.Command)
-			
+
 			b.WriteString(num)
 			b.WriteString(" ")
 			b.WriteString(desc)
@@ -480,18 +480,18 @@ func (m *Model) detailView() string {
 			b.WriteString("\n")
 		}
 	}
-	
+
 	// Notification
 	if m.notification != "" {
 		b.WriteString("\n")
 		b.WriteString(notificationStyle.Render(m.notification))
 	}
-	
+
 	// Footer
 	footer := helpStyle.Render("↑/↓: select • 1-9: jump • c: copy • e: execute • esc: back")
 	b.WriteString("\n")
 	b.WriteString(footer)
-	
+
 	return boxStyle.Render(b.String())
 }
 
@@ -500,15 +500,15 @@ func (m *Model) renderPage(page *Page) string {
 	if page == nil {
 		return ""
 	}
-	
+
 	var b strings.Builder
-	
+
 	// Description
 	if page.Description != "" {
 		b.WriteString(descriptionStyle.Render(page.Description))
 		b.WriteString("\n")
 	}
-	
+
 	// Examples
 	if len(page.Examples) > 0 {
 		b.WriteString(lipgloss.NewStyle().
@@ -516,12 +516,12 @@ func (m *Model) renderPage(page *Page) string {
 			Foreground(primaryColor).
 			Render("Examples:"))
 		b.WriteString("\n")
-		
+
 		for i, ex := range page.Examples {
 			b.WriteString(fmt.Sprintf("%d. ", i+1))
 			b.WriteString(exampleDescStyle.Render(ex.Description))
 			b.WriteString("\n")
-			
+
 			// Command with selection highlight
 			cmdStyle := exampleCmdStyle
 			if i == m.selectedExample {
@@ -531,7 +531,7 @@ func (m *Model) renderPage(page *Page) string {
 			b.WriteString("\n")
 		}
 	}
-	
+
 	return b.String()
 }
 
@@ -588,7 +588,7 @@ func (m *Model) loadInitialSuggestions() tea.Cmd {
 		if err != nil {
 			return searchResultsMsg{err: err}
 		}
-		
+
 		var pages []Page
 		for _, cmd := range commands {
 			pages = append(pages, Page{
@@ -597,7 +597,7 @@ func (m *Model) loadInitialSuggestions() tea.Cmd {
 				Platform:    "common",
 			})
 		}
-		
+
 		return searchResultsMsg{pages: pages}
 	}
 }
@@ -606,17 +606,17 @@ func (m *Model) loadInitialSuggestions() tea.Cmd {
 func (m *Model) searchCommand(query string) tea.Cmd {
 	m.loading = true
 	m.err = nil
-	
+
 	return func() tea.Msg {
 		ctx := context.Background()
 		page, err := m.client.GetPageAnyPlatform(ctx, query)
-		
+
 		if err != nil {
 			// Try to get from common commands
 			commands, _ := m.client.GetAvailableCommands(ctx)
 			var pages []Page
 			queryLower := strings.ToLower(query)
-			
+
 			for _, cmd := range commands {
 				if strings.Contains(strings.ToLower(cmd), queryLower) {
 					pages = append(pages, Page{
@@ -626,14 +626,14 @@ func (m *Model) searchCommand(query string) tea.Cmd {
 					})
 				}
 			}
-			
+
 			if len(pages) == 0 {
 				return searchResultsMsg{err: fmt.Errorf("command not found: %s", query)}
 			}
-			
+
 			return searchResultsMsg{pages: pages}
 		}
-		
+
 		return searchResultsMsg{pages: []Page{*page}}
 	}
 }
@@ -642,7 +642,7 @@ func (m *Model) searchCommand(query string) tea.Cmd {
 func (m *Model) showPage(command string) tea.Cmd {
 	m.loading = true
 	m.err = nil
-	
+
 	return func() tea.Msg {
 		ctx := context.Background()
 		page, err := m.client.GetPageAnyPlatform(ctx, command)
@@ -664,13 +664,13 @@ func cleanCommand(cmd string) string {
 			break
 		}
 		end += start
-		
+
 		// Extract the placeholder content
 		placeholder := result[start+1 : end]
-		
+
 		// If it has | (choices), use the first one
-		if idx := strings.Index(placeholder, "|"); idx != -1 {
-			choice := strings.TrimSpace(placeholder[:idx])
+		if before, _, ok := strings.Cut(placeholder, "|"); ok {
+			choice := strings.TrimSpace(before)
 			// Remove [ and ] if present
 			choice = strings.Trim(choice, "[]")
 			result = result[:start] + choice + result[end+1:]
@@ -679,17 +679,17 @@ func cleanCommand(cmd string) string {
 			result = result[:start] + result[end+1:]
 		}
 	}
-	
+
 	return strings.TrimSpace(result)
 }
 
 // ExecuteCommand executes a command in the shell
 func ExecuteCommand(cmd string) error {
 	cleanCmd := cleanCommand(cmd)
-	
+
 	var shell string
 	var args []string
-	
+
 	switch runtime.GOOS {
 	case "windows":
 		// Try PowerShell first, then CMD
@@ -707,12 +707,12 @@ func ExecuteCommand(cmd string) error {
 		}
 		args = []string{"-c", cleanCmd}
 	}
-	
+
 	command := exec.Command(shell, args...)
 	command.Stdout = os.Stdout
 	command.Stderr = os.Stderr
 	command.Stdin = os.Stdin
-	
+
 	return command.Run()
 }
 
@@ -721,7 +721,7 @@ func CreateTable(pages []Page) string {
 	if len(pages) == 0 {
 		return "No results found"
 	}
-	
+
 	rows := [][]string{}
 	for _, page := range pages {
 		platform := platformStyle.Render(page.Platform)
@@ -731,7 +731,7 @@ func CreateTable(pages []Page) string {
 			platform,
 		})
 	}
-	
+
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(lipgloss.NewStyle().Foreground(primaryColor)).
@@ -747,7 +747,7 @@ func CreateTable(pages []Page) string {
 		}).
 		Headers("Command", "Description", "Platform").
 		Rows(rows...)
-	
+
 	return t.String()
 }
 
@@ -756,9 +756,9 @@ func FormatPage(page *Page) string {
 	if page == nil {
 		return ""
 	}
-	
+
 	var b strings.Builder
-	
+
 	// Title with platform
 	title := lipgloss.JoinHorizontal(
 		lipgloss.Left,
@@ -768,13 +768,13 @@ func FormatPage(page *Page) string {
 	)
 	b.WriteString(title)
 	b.WriteString("\n")
-	
+
 	// Description
 	if page.Description != "" {
 		b.WriteString(descriptionStyle.Render(page.Description))
 		b.WriteString("\n")
 	}
-	
+
 	// Examples
 	if len(page.Examples) > 0 {
 		b.WriteString(lipgloss.NewStyle().
@@ -782,7 +782,7 @@ func FormatPage(page *Page) string {
 			Foreground(primaryColor).
 			Render("Examples:"))
 		b.WriteString("\n")
-		
+
 		for i, ex := range page.Examples {
 			// Example number and description
 			b.WriteString(lipgloss.NewStyle().
@@ -792,12 +792,12 @@ func FormatPage(page *Page) string {
 			b.WriteString(" ")
 			b.WriteString(exampleDescStyle.Render(ex.Description))
 			b.WriteString("\n")
-			
+
 			// Command
 			b.WriteString(exampleCmdStyle.Render(ex.Command))
 			b.WriteString("\n")
 		}
 	}
-	
+
 	return boxStyle.Render(b.String())
 }

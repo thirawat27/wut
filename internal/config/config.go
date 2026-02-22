@@ -54,11 +54,11 @@ type UIConfig struct {
 
 // DatabaseConfig holds database settings
 type DatabaseConfig struct {
-	Type          string `mapstructure:"type"`
-	Path          string `mapstructure:"path"`
-	MaxSize       int    `mapstructure:"max_size"`
-	BackupEnabled bool   `mapstructure:"backup_enabled"`
-	BackupInterval int   `mapstructure:"backup_interval"`
+	Type           string `mapstructure:"type"`
+	Path           string `mapstructure:"path"`
+	MaxSize        int    `mapstructure:"max_size"`
+	BackupEnabled  bool   `mapstructure:"backup_enabled"`
+	BackupInterval int    `mapstructure:"backup_interval"`
 }
 
 // HistoryConfig holds history settings
@@ -109,7 +109,7 @@ type TLDRConfig struct {
 	AutoSyncInterval int    `mapstructure:"auto_sync_interval"` // days
 	OfflineMode      bool   `mapstructure:"offline_mode"`
 	AutoDetectOnline bool   `mapstructure:"auto_detect_online"`
-	MaxCacheAge      int    `mapstructure:"max_cache_age"`      // days
+	MaxCacheAge      int    `mapstructure:"max_cache_age"` // days
 	DefaultPlatform  string `mapstructure:"default_platform"`
 }
 
@@ -402,29 +402,29 @@ func GetConfigPath() string {
 // Reset resets configuration to defaults
 func Reset() error {
 	path := GetConfigPath()
-	
+
 	// Remove existing config
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("failed to remove existing config: %w", err)
 	}
-	
+
 	// Reset viper
 	viper.Reset()
-	
+
 	// Recreate default config
 	setDefaults()
-	
+
 	// Create new config file
 	if err := createDefaultConfig(path); err != nil {
 		return fmt.Errorf("failed to create default config: %w", err)
 	}
-	
+
 	// Reload config
 	cfg, err := Load(path)
 	if err != nil {
 		return fmt.Errorf("failed to reload config: %w", err)
 	}
-	
+
 	globalConfig = cfg
 	return nil
 }
@@ -442,25 +442,25 @@ func Edit() error {
 			}
 		}
 	}
-	
+
 	if editor == "" {
 		return fmt.Errorf("no editor found. Set EDITOR environment variable")
 	}
-	
+
 	path := GetConfigPath()
-	
+
 	// Ensure file exists
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		if err := createDefaultConfig(path); err != nil {
 			return fmt.Errorf("failed to create config file: %w", err)
 		}
 	}
-	
+
 	cmd := exec.Command(editor, path)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	return cmd.Run()
 }
 
@@ -471,13 +471,13 @@ func Import(path string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read import file: %w", err)
 	}
-	
+
 	// Validate YAML
 	var importedCfg Config
 	if err := yaml.Unmarshal(data, &importedCfg); err != nil {
 		return fmt.Errorf("invalid config file: %w", err)
 	}
-	
+
 	// Backup current config
 	currentPath := GetConfigPath()
 	backupPath := currentPath + ".backup." + time.Now().Format("20060102-150405")
@@ -486,22 +486,22 @@ func Import(path string) error {
 			return fmt.Errorf("failed to create backup: %w", err)
 		}
 	}
-	
+
 	// Copy new config
 	if err := copyFile(path, currentPath); err != nil {
 		// Restore backup on failure
-		copyFile(backupPath, currentPath)
+		_ = copyFile(backupPath, currentPath)
 		return fmt.Errorf("failed to import config: %w", err)
 	}
-	
+
 	// Reload
 	cfg, err := Load(currentPath)
 	if err != nil {
 		// Restore backup on failure
-		copyFile(backupPath, currentPath)
+		_ = copyFile(backupPath, currentPath)
 		return fmt.Errorf("failed to load imported config: %w", err)
 	}
-	
+
 	globalConfig = cfg
 	return nil
 }
@@ -518,13 +518,13 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer source.Close()
-	
+
 	destination, err := os.Create(dst)
 	if err != nil {
 		return err
 	}
 	defer destination.Close()
-	
+
 	_, err = io.Copy(destination, source)
 	return err
 }

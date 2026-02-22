@@ -45,7 +45,7 @@ func (i *Installer) Install(shell string) error {
 	defer f.Close()
 
 	marker := fmt.Sprintf("\n# WUT Shell Integration\n%s\n# End WUT Integration\n", shellCode)
-	
+
 	if _, err := f.WriteString(marker); err != nil {
 		return fmt.Errorf("failed to write shell config: %w", err)
 	}
@@ -207,7 +207,7 @@ Set-PSReadLineKeyHandler -Chord 'Ctrl+g' -ScriptBlock { Invoke-WUT-WithCurrent }
 // detectShells detects available shells
 func detectShells() []string {
 	var shells []string
-	
+
 	candidates := []string{"bash", "zsh", "fish"}
 	if runtime.GOOS == "windows" {
 		candidates = []string{"powershell", "pwsh", "cmd"}

@@ -54,10 +54,10 @@ func (s *Storage) AddHistory(ctx context.Context, command string) error {
 	if s.db == nil {
 		return fmt.Errorf("storage database not initialized")
 	}
-	
+
 	// Check if command already exists
 	key := fmt.Sprintf("history/%s", command)
-	
+
 	var entry HistoryEntry
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(historyBucketName))
@@ -70,7 +70,7 @@ func (s *Storage) AddHistory(ctx context.Context, command string) error {
 		}
 		return json.Unmarshal(data, &entry)
 	})
-	
+
 	if err == nil {
 		// Update existing entry
 		entry.UsageCount++
@@ -84,12 +84,12 @@ func (s *Storage) AddHistory(ctx context.Context, command string) error {
 			LastUsed:    time.Now(),
 		}
 	}
-	
+
 	data, err := json.Marshal(entry)
 	if err != nil {
 		return fmt.Errorf("failed to marshal history entry: %w", err)
 	}
-	
+
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket, err := tx.CreateBucketIfNotExists([]byte(historyBucketName))
 		if err != nil {
@@ -104,15 +104,15 @@ func (s *Storage) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, er
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("storage not initialized")
 	}
-	
+
 	var entries []HistoryEntry
-	
+
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(historyBucketName))
 		if bucket == nil {
 			return nil // No history yet
 		}
-		
+
 		return bucket.ForEach(func(k, v []byte) error {
 			var entry HistoryEntry
 			if err := json.Unmarshal(v, &entry); err == nil {
@@ -121,21 +121,21 @@ func (s *Storage) GetHistory(ctx context.Context, limit int) ([]HistoryEntry, er
 			return nil
 		})
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Sort by last used (most recent first)
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].LastUsed.After(entries[j].LastUsed)
 	})
-	
+
 	// Apply limit if specified
 	if limit > 0 && len(entries) > limit {
 		entries = entries[:limit]
 	}
-	
+
 	return entries, nil
 }
 
@@ -145,10 +145,10 @@ func (s *Storage) SearchHistory(ctx context.Context, query string, limit int) ([
 	if err != nil {
 		return nil, err
 	}
-	
+
 	queryLower := strings.ToLower(query)
 	var results []HistoryEntry
-	
+
 	for _, entry := range allEntries {
 		if strings.Contains(strings.ToLower(entry.Command), queryLower) {
 			results = append(results, entry)
@@ -157,7 +157,7 @@ func (s *Storage) SearchHistory(ctx context.Context, query string, limit int) ([
 			}
 		}
 	}
-	
+
 	return results, nil
 }
 
@@ -166,7 +166,7 @@ func (s *Storage) ClearHistory(ctx context.Context) error {
 	if s == nil || s.db == nil {
 		return fmt.Errorf("storage not initialized")
 	}
-	
+
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		// Delete and recreate the bucket
 		if err := tx.DeleteBucket([]byte(historyBucketName)); err != nil {
@@ -186,12 +186,12 @@ func (s *Storage) ExportHistory(ctx context.Context, filepath string) error {
 	if err != nil {
 		return err
 	}
-	
+
 	data, err := json.MarshalIndent(entries, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal history: %w", err)
 	}
-	
+
 	return os.WriteFile(filepath, data, 0644)
 }
 
@@ -201,18 +201,18 @@ func (s *Storage) ImportHistory(ctx context.Context, filepath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to read file: %w", err)
 	}
-	
+
 	var entries []HistoryEntry
 	if err := json.Unmarshal(data, &entries); err != nil {
 		return fmt.Errorf("failed to parse history: %w", err)
 	}
-	
+
 	for _, entry := range entries {
 		if err := s.AddHistory(ctx, entry.Command); err != nil {
 			return err
 		}
 	}
-	
+
 	return nil
 }
 
@@ -222,53 +222,48 @@ func (s *Storage) GetHistoryStats(ctx context.Context) (*HistoryStats, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	stats := &HistoryStats{
 		UniqueCommands: len(entries),
 		TopCommands:    []CommandStat{},
 		TopCategories:  []CategoryStat{},
 	}
-	
+
 	if len(entries) == 0 {
 		return stats, nil
 	}
-	
+
 	// Calculate totals and find most used
 	totalUsage := 0
 	maxCount := 0
 	for _, entry := range entries {
 		stats.TotalCommands += entry.UsageCount
 		totalUsage += entry.UsageCount
-		
+
 		if entry.UsageCount > maxCount {
 			maxCount = entry.UsageCount
 			stats.MostUsedCommand = entry.Command
 			stats.MostUsedCount = entry.UsageCount
 		}
 	}
-	
+
 	if stats.UniqueCommands > 0 {
 		stats.AverageUsage = float64(totalUsage) / float64(stats.UniqueCommands)
 	}
-	
+
 	// Sort by usage count for top commands
 	sort.Slice(entries, func(i, j int) bool {
 		return entries[i].UsageCount > entries[j].UsageCount
 	})
-	
+
 	// Get top 10 commands
-	limit := 10
-	if len(entries) < limit {
-		limit = len(entries)
-	}
+	limit := min(len(entries), 10)
 	for i := 0; i < limit; i++ {
 		stats.TopCommands = append(stats.TopCommands, CommandStat{
 			Command: entries[i].Command,
 			Count:   entries[i].UsageCount,
 		})
 	}
-	
+
 	return stats, nil
 }
-
-

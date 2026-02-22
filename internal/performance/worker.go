@@ -25,13 +25,13 @@ func (f TaskFunc) Execute(ctx context.Context) error {
 
 // WorkerPool is a high-performance worker pool with lock-free operations
 type WorkerPool struct {
-	taskQueue   *RingBuffer[taskWrapper]
-	workers     int
-	active      atomic.Bool
-	wg          sync.WaitGroup
-	ctx         context.Context
-	cancel      context.CancelFunc
-	panicHandler func(interface{})
+	taskQueue    *RingBuffer[taskWrapper]
+	workers      int
+	active       atomic.Bool
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	panicHandler func(any)
 }
 
 type taskWrapper struct {
@@ -59,7 +59,7 @@ func NewWorkerPool(workers, queueSize int) *WorkerPool {
 }
 
 // SetPanicHandler sets a handler for panics in workers
-func (p *WorkerPool) SetPanicHandler(handler func(interface{})) {
+func (p *WorkerPool) SetPanicHandler(handler func(any)) {
 	p.panicHandler = handler
 }
 
@@ -174,9 +174,9 @@ func (p *WorkerPool) QueueSize() uint64 {
 
 // Stats holds pool statistics
 type PoolStats struct {
-	Workers     int
-	QueueSize   uint64
-	Active      bool
+	Workers   int
+	QueueSize uint64
+	Active    bool
 }
 
 // Stats returns pool statistics
@@ -286,7 +286,7 @@ func (p *AdaptivePool) worker() {
 
 		case task := <-p.taskQueue:
 			idleTimer.Reset(p.idleTimeout)
-			task.Execute(p.ctx)
+			_ = task.Execute(p.ctx)
 
 		case <-idleTimer.C:
 			// Check if we can scale down
@@ -333,7 +333,7 @@ func NewPriorityPool(workers, queueSizePerPriority int) *PriorityPool {
 		cancel:         cancel,
 	}
 
-	for i := 0; i < workers; i++ {
+	for range workers {
 		pool.wg.Add(1)
 		go pool.worker()
 	}
@@ -387,7 +387,7 @@ func (p *PriorityPool) worker() {
 			return
 
 		case task := <-p.highPriority:
-			task.Execute(p.ctx)
+			_ = task.Execute(p.ctx)
 
 		default:
 			select {
@@ -395,10 +395,10 @@ func (p *PriorityPool) worker() {
 				return
 
 			case task := <-p.highPriority:
-				task.Execute(p.ctx)
+				_ = task.Execute(p.ctx)
 
 			case task := <-p.mediumPriority:
-				task.Execute(p.ctx)
+				_ = task.Execute(p.ctx)
 
 			default:
 				select {
@@ -406,13 +406,13 @@ func (p *PriorityPool) worker() {
 					return
 
 				case task := <-p.highPriority:
-					task.Execute(p.ctx)
+					_ = task.Execute(p.ctx)
 
 				case task := <-p.mediumPriority:
-					task.Execute(p.ctx)
+					_ = task.Execute(p.ctx)
 
 				case task := <-p.lowPriority:
-					task.Execute(p.ctx)
+					_ = task.Execute(p.ctx)
 				}
 			}
 		}
@@ -452,9 +452,7 @@ func ParallelMap[T any, R any](items []T, fn func(T) (R, error), maxWorkers int)
 
 	// Start workers
 	for i := 0; i < maxWorkers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for idx := range work {
 				result, err := fn(items[idx])
 				if err != nil {
@@ -466,7 +464,7 @@ func ParallelMap[T any, R any](items []T, fn func(T) (R, error), maxWorkers int)
 					results[idx] = result
 				}
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -495,8 +493,8 @@ func ParallelForEach[T any](items []T, fn func(T) error, maxWorkers int) error {
 // ParallelFilter filters items in parallel
 func ParallelFilter[T any](items []T, predicate func(T) bool, maxWorkers int) []T {
 	type result struct {
-		item  T
-		keep  bool
+		item T
+		keep bool
 	}
 
 	results, _ := ParallelMap(items, func(item T) (result, error) {
@@ -550,9 +548,9 @@ func (p *Pipeline[T]) ProcessBatch(ctx context.Context, items []T, workers int) 
 
 // RateLimiter provides token bucket rate limiting
 type RateLimiter struct {
-	tokens   atomic.Int64
-	maxTokens int64
-	interval  time.Duration
+	tokens     atomic.Int64
+	maxTokens  int64
+	interval   time.Duration
 	lastRefill atomic.Int64
 }
 
