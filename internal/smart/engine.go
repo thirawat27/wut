@@ -183,56 +183,84 @@ done:
 	return e.limitSuggestions(results, limit), nil
 }
 
-// getHistorySuggestions gets suggestions from command history
+// getHistorySuggestions gets suggestions from command history sequentially
 func (e *Engine) getHistorySuggestions(ctx context.Context, query string, limit int) []Suggestion {
 	if e.storage == nil {
 		return nil
 	}
 
-	// Check context before database call
 	select {
 	case <-ctx.Done():
 		return nil
 	default:
 	}
 
-	// Use smaller limit for faster response
-	historyLimit := 100
+	historyLimit := 1000 // Look deep for sequential mapping
 	if limit > 0 && limit < 100 {
-		historyLimit = limit * 10
+		historyLimit = limit * 50
 	}
 
 	entries, err := e.storage.GetHistory(ctx, historyLimit)
-	if err != nil {
+	if err != nil || len(entries) == 0 {
 		return nil
 	}
 
 	var suggestions []Suggestion
+	recentCmd := entries[0].Command
+
+	cmdScores := make(map[string]float64)
+	usageCounts := make(map[string]int)
+	lastUsed := make(map[string]time.Time)
 	now := time.Now()
-	maxEntries := 50 // Limit processing
 
-	for i, entry := range entries {
-		if i >= maxEntries {
-			break
+	for i := 0; i < len(entries); i++ {
+		cmd := entries[i].Command
+		usageCounts[cmd]++
+
+		if _, exists := lastUsed[cmd]; !exists {
+			lastUsed[cmd] = entries[i].Timestamp
 		}
-		// Check context periodically
-		if i%10 == 0 {
-			select {
-			case <-ctx.Done():
-				return suggestions
-			default:
+
+		score := 0.0
+
+		if query != "" {
+			result := e.matcher.Match(query, cmd)
+			if !result.Matched {
+				continue
 			}
+			score += result.Score * e.weights.FuzzyMatch
 		}
 
-		score := e.calculateHistoryScore(entry, query, now)
-		if score > 0 {
+		// Markov-inspired sequence boost
+		if i < len(entries)-1 && entries[i+1].Command == recentCmd {
+			score += 5.0
+		}
+
+		daysSince := now.Sub(entries[i].Timestamp).Hours() / 24
+		if daysSince < 1 {
+			score += e.weights.Recency * 1.5
+		} else if daysSince < 7 {
+			score += e.weights.Recency * 0.8
+		}
+
+		cmdScores[cmd] += score
+	}
+
+	for cmd, count := range usageCounts {
+		if count > 1 {
+			cmdScores[cmd] += (float64(count) / 100.0) * e.weights.HistoryFreq
+		}
+	}
+
+	for cmd, score := range cmdScores {
+		if score > 0 || query == "" {
 			suggestions = append(suggestions, Suggestion{
-				Command:     entry.Command,
-				Description: "Used " + formatCount(entry.UsageCount),
+				Command:     cmd,
+				Description: fmt.Sprintf("Used %s", formatCount(usageCounts[cmd])),
 				Score:       score,
-				Source:      "📜 History",
-				UsageCount:  entry.UsageCount,
-				LastUsed:    entry.LastUsed,
+				Source:      "🌌 Smart History",
+				UsageCount:  usageCounts[cmd],
+				LastUsed:    lastUsed[cmd],
 			})
 		}
 	}
@@ -240,40 +268,7 @@ func (e *Engine) getHistorySuggestions(ctx context.Context, query string, limit 
 	return suggestions
 }
 
-// calculateHistoryScore calculates score based on history
-func (e *Engine) calculateHistoryScore(entry db.HistoryEntry, query string, now time.Time) float64 {
-	score := 0.0
-
-	// Check match quality
-	if query != "" {
-		result := e.matcher.Match(query, entry.Command)
-		if !result.Matched {
-			return 0
-		}
-		score = result.Score * e.weights.FuzzyMatch
-	}
-
-	// Frequency boost
-	freqScore := float64(entry.UsageCount) / 100.0
-	if freqScore > 1.0 {
-		freqScore = 1.0
-	}
-	score += freqScore * e.weights.HistoryFreq
-
-	// Recency boost
-	daysSince := now.Sub(entry.LastUsed).Hours() / 24
-	if daysSince < 1 {
-		score += e.weights.Recency
-	} else if daysSince < 7 {
-		score += e.weights.Recency * 0.7
-	} else if daysSince < 30 {
-		score += e.weights.Recency * 0.4
-	} else if daysSince < 90 {
-		score += e.weights.Recency * 0.2
-	}
-
-	return score
-}
+// (Legacy method removed, handled via unified scoring above)
 
 // getContextSuggestions gets context-specific suggestions
 func (e *Engine) getContextSuggestions(ctx *appctx.Context, query string) []Suggestion {

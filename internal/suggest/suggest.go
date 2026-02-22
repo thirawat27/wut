@@ -1,5 +1,3 @@
-// Package suggest provides command suggestions based on history and fuzzy matching
-// This is a lightweight replacement for the AI-based suggestion system
 package suggest
 
 import (
@@ -7,8 +5,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/agnivade/levenshtein"
 	"wut/internal/db"
+
+	"github.com/agnivade/levenshtein"
 )
 
 // Suggester provides command suggestions
@@ -37,21 +36,17 @@ func (s *Suggester) Suggest(ctx context.Context, query string, limit int) ([]Res
 		limit = 5
 	}
 
-	// Get all history entries
 	entries, err := s.storage.GetHistory(ctx, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	// Score and rank suggestions
 	results := s.scoreSuggestions(query, entries)
 
-	// Sort by score (descending)
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score
 	})
 
-	// Return top results
 	if len(results) > limit {
 		results = results[:limit]
 	}
@@ -60,16 +55,21 @@ func (s *Suggester) Suggest(ctx context.Context, query string, limit int) ([]Res
 }
 
 // scoreSuggestions scores history entries based on query match
-func (s *Suggester) scoreSuggestions(query string, entries []db.HistoryEntry) []Result {
+func (s *Suggester) scoreSuggestions(query string, entries []db.CommandExecution) []Result {
 	query = strings.ToLower(strings.TrimSpace(query))
-	results := make([]Result, 0, len(entries))
+	results := make([]Result, 0)
+
+	freqs := make(map[string]int)
+	for _, e := range entries {
+		freqs[e.Command]++
+	}
+
 	seen := make(map[string]bool)
 
 	for _, entry := range entries {
 		cmd := entry.Command
 		cmdLower := strings.ToLower(cmd)
 
-		// Skip duplicates
 		if seen[cmd] {
 			continue
 		}
@@ -78,30 +78,26 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.HistoryEntry) []
 		score := 0.0
 		source := "history"
 
+		usageCount := freqs[cmd]
+
 		if query == "" {
-			// No query - rank by usage frequency
-			score = float64(entry.UsageCount) * 10.0
+			score = float64(usageCount) * 10.0
 			source = "history"
 		} else if cmdLower == query {
-			// Exact match - highest score
 			score = 1000.0
 			source = "exact"
 		} else if strings.HasPrefix(cmdLower, query) {
-			// Prefix match - high score
-			score = 500.0 + float64(entry.UsageCount)*5.0
+			score = 500.0 + float64(usageCount)*5.0
 			source = "prefix"
 		} else if strings.Contains(cmdLower, query) {
-			// Substring match - medium score
-			score = 300.0 + float64(entry.UsageCount)*3.0
+			score = 300.0 + float64(usageCount)*3.0
 			source = "substring"
 		} else {
-			// Fuzzy match - calculate Levenshtein distance
 			distance := levenshtein.ComputeDistance(query, cmdLower)
 			maxLen := max(len(cmdLower), len(query))
 			if maxLen > 0 && distance <= maxLen/2 {
-				// Similar enough - give it a score
 				similarity := 1.0 - float64(distance)/float64(maxLen)
-				score = similarity * 100.0 * float64(entry.UsageCount)
+				score = similarity * 100.0 * float64(usageCount)
 				source = "fuzzy"
 			}
 		}
@@ -115,7 +111,6 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.HistoryEntry) []
 		}
 	}
 
-	// Add common commands if query is provided and we have few results
 	if query != "" && len(results) < 3 {
 		commonCmds := getCommonCommands(query)
 		for _, cmd := range commonCmds {
@@ -133,7 +128,6 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.HistoryEntry) []
 	return results
 }
 
-// getCommonCommands returns common commands that match the query
 func getCommonCommands(query string) []string {
 	query = strings.ToLower(query)
 	common := []string{
@@ -169,28 +163,31 @@ func (s *Suggester) GetMostUsed(ctx context.Context, limit int) ([]Result, error
 		return nil, err
 	}
 
-	// Sort by usage count
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].UsageCount > entries[j].UsageCount
-	})
-
-	if limit > 0 && len(entries) > limit {
-		entries = entries[:limit]
+	freqs := make(map[string]int)
+	for _, e := range entries {
+		freqs[e.Command]++
 	}
 
-	results := make([]Result, len(entries))
-	for i, entry := range entries {
-		results[i] = Result{
-			Command: entry.Command,
-			Score:   float64(entry.UsageCount),
+	var results []Result
+	for cmd, count := range freqs {
+		results = append(results, Result{
+			Command: cmd,
+			Score:   float64(count),
 			Source:  "history",
-		}
+		})
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if limit > 0 && len(results) > limit {
+		results = results[:limit]
 	}
 
 	return results, nil
 }
 
-// Close closes the suggester
 func (s *Suggester) Close() error {
 	return nil
 }
