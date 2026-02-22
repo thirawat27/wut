@@ -2,13 +2,13 @@ package db
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/goccy/go-json"
 	"go.etcd.io/bbolt"
 )
 

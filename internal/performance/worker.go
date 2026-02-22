@@ -8,6 +8,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/panjf2000/ants/v2"
 )
 
 // Task represents a unit of work
@@ -23,12 +25,10 @@ func (f TaskFunc) Execute(ctx context.Context) error {
 	return f(ctx)
 }
 
-// WorkerPool is a high-performance worker pool with lock-free operations
+// WorkerPool is a high-performance worker pool powered by ants
 type WorkerPool struct {
-	taskQueue    *RingBuffer[taskWrapper]
-	workers      int
+	pool         *ants.PoolWithFunc
 	active       atomic.Bool
-	wg           sync.WaitGroup
 	ctx          context.Context
 	cancel       context.CancelFunc
 	panicHandler func(any)
@@ -39,7 +39,7 @@ type taskWrapper struct {
 	done chan error
 }
 
-// NewWorkerPool creates a new worker pool
+// NewWorkerPool creates a new worker pool using ants
 func NewWorkerPool(workers, queueSize int) *WorkerPool {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
@@ -50,29 +50,47 @@ func NewWorkerPool(workers, queueSize int) *WorkerPool {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &WorkerPool{
-		taskQueue: NewRingBuffer[taskWrapper](queueSize),
-		workers:   workers,
-		ctx:       ctx,
-		cancel:    cancel,
+	p := &WorkerPool{
+		ctx:    ctx,
+		cancel: cancel,
 	}
+
+	pool, _ := ants.NewPoolWithFunc(workers, func(i interface{}) {
+		wrapper := i.(taskWrapper)
+
+		if p.panicHandler != nil {
+			defer func() {
+				if r := recover(); r != nil {
+					p.panicHandler(r)
+				}
+			}()
+		}
+
+		err := wrapper.task.Execute(p.ctx)
+
+		if wrapper.done != nil {
+			select {
+			case wrapper.done <- err:
+			case <-p.ctx.Done():
+			}
+		}
+	}, ants.WithMaxBlockingTasks(queueSize), ants.WithNonblocking(false))
+
+	p.pool = pool
+	return p
 }
 
 // SetPanicHandler sets a handler for panics in workers
 func (p *WorkerPool) SetPanicHandler(handler func(any)) {
 	p.panicHandler = handler
+	if p.pool != nil {
+		p.pool.Tune(p.pool.Cap()) // Optional safety re-tune for handler
+	}
 }
 
 // Start starts the worker pool
 func (p *WorkerPool) Start() {
-	if !p.active.CompareAndSwap(false, true) {
-		return
-	}
-
-	for i := 0; i < p.workers; i++ {
-		p.wg.Add(1)
-		go p.worker(i)
-	}
+	p.active.Store(true)
 }
 
 // Stop stops the worker pool
@@ -80,27 +98,28 @@ func (p *WorkerPool) Stop() {
 	if !p.active.CompareAndSwap(true, false) {
 		return
 	}
-
 	p.cancel()
-	p.wg.Wait()
+	if p.pool != nil {
+		p.pool.Release()
+	}
 }
 
 // Submit submits a task to the pool
-// Returns true if submitted, false if queue is full
 func (p *WorkerPool) Submit(task Task) bool {
-	if !p.active.Load() {
+	if !p.active.Load() || p.pool == nil {
 		return false
 	}
 
 	wrapper := taskWrapper{
 		task: task,
 	}
-	return p.taskQueue.TryPush(wrapper)
+	err := p.pool.Invoke(wrapper)
+	return err == nil
 }
 
 // SubmitWait submits a task and waits for completion
 func (p *WorkerPool) SubmitWait(task Task) error {
-	if !p.active.Load() {
+	if !p.active.Load() || p.pool == nil {
 		return context.Canceled
 	}
 
@@ -110,8 +129,8 @@ func (p *WorkerPool) SubmitWait(task Task) error {
 		done: done,
 	}
 
-	if !p.taskQueue.TryPush(wrapper) {
-		return context.DeadlineExceeded
+	if err := p.pool.Invoke(wrapper); err != nil {
+		return err // Usually ants.ErrPoolOverload or similar if non-blocking
 	}
 
 	select {
@@ -122,54 +141,17 @@ func (p *WorkerPool) SubmitWait(task Task) error {
 	}
 }
 
-// worker is the worker goroutine
-func (p *WorkerPool) worker(id int) {
-	defer p.wg.Done()
-
-	if p.panicHandler != nil {
-		defer func() {
-			if r := recover(); r != nil {
-				p.panicHandler(r)
-			}
-		}()
-	}
-
-	for {
-		select {
-		case <-p.ctx.Done():
-			return
-		default:
-		}
-
-		// Try to get task
-		wrapper, ok := p.taskQueue.TryPop()
-		if !ok {
-			runtime.Gosched()
-			continue
-		}
-
-		// Execute task
-		err := wrapper.task.Execute(p.ctx)
-
-		// Send result if channel exists
-		if wrapper.done != nil {
-			select {
-			case wrapper.done <- err:
-			case <-p.ctx.Done():
-				return
-			}
-		}
-	}
-}
-
 // IsActive returns true if pool is active
 func (p *WorkerPool) IsActive() bool {
-	return p.active.Load()
+	return p.active.Load() && p.pool != nil
 }
 
 // QueueSize returns the current queue size
 func (p *WorkerPool) QueueSize() uint64 {
-	return p.taskQueue.Len()
+	if p.pool == nil {
+		return 0
+	}
+	return uint64(p.pool.Running())
 }
 
 // Stats holds pool statistics
@@ -181,9 +163,14 @@ type PoolStats struct {
 
 // Stats returns pool statistics
 func (p *WorkerPool) Stats() PoolStats {
+	workers, queue := 0, uint64(0)
+	if p.pool != nil {
+		workers = p.pool.Cap()
+		queue = uint64(p.pool.Running())
+	}
 	return PoolStats{
-		Workers:   p.workers,
-		QueueSize: p.taskQueue.Len(),
+		Workers:   workers,
+		QueueSize: queue,
 		Active:    p.active.Load(),
 	}
 }

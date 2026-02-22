@@ -2,10 +2,10 @@
 package performance
 
 import (
-	"hash/fnv"
 	"sync"
 	"sync/atomic"
 	"time"
+	"github.com/cespare/xxhash/v2"
 )
 
 // LRUCache is a high-performance thread-safe LRU cache
@@ -72,30 +72,27 @@ func newCacheShard[K comparable, V any](capacity int) *cacheShard[K, V] {
 
 // getShard returns the shard for a given key
 func (c *LRUCache[K, V]) getShard(key K) *cacheShard[K, V] {
-	h := fnv64(key)
+	h := fastHash64(key)
 	return c.shards[h&c.shardMask]
 }
 
-// fnv64 computes FNV-1a hash for a key
-func fnv64[K comparable](key K) uint64 {
-	h := fnv.New64a()
+// fastHash64 computes an ultra-fast xxhash for a key
+func fastHash64[K comparable](key K) uint64 {
 	switch k := any(key).(type) {
 	case string:
-		h.Write([]byte(k))
+		return xxhash.Sum64String(k)
 	case []byte:
-		h.Write(k)
+		return xxhash.Sum64(k)
 	case int:
-		h.Write([]byte{byte(k), byte(k >> 8), byte(k >> 16), byte(k >> 24),
+		return xxhash.Sum64([]byte{byte(k), byte(k >> 8), byte(k >> 16), byte(k >> 24),
 			byte(k >> 32), byte(k >> 40), byte(k >> 48), byte(k >> 56)})
 	case uint64:
-		h.Write([]byte{byte(k), byte(k >> 8), byte(k >> 16), byte(k >> 24),
+		return xxhash.Sum64([]byte{byte(k), byte(k >> 8), byte(k >> 16), byte(k >> 24),
 			byte(k >> 32), byte(k >> 40), byte(k >> 48), byte(k >> 56)})
 	default:
-		// For other types, use a simple hash
-		s := any(key).(string)
-		h.Write([]byte(s))
+		// For other types, use stringification
+		return xxhash.Sum64String(any(key).(string))
 	}
-	return h.Sum64()
 }
 
 // Get retrieves a value from the cache

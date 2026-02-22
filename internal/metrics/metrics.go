@@ -3,12 +3,13 @@ package metrics
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/goccy/go-json"
 )
 
 // Metrics holds all application metrics

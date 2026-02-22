@@ -2,12 +2,12 @@
 package performance
 
 import (
-	"encoding/json"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/goccy/go-json"
 	"go.etcd.io/bbolt"
 )
 
