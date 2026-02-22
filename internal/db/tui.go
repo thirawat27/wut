@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
+	"golang.design/x/clipboard"
 )
 
 // Styles for the TUI
@@ -161,10 +161,11 @@ func NewModel() *Model {
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
 	l.Title = "Database - Command Cheat Sheets"
 	l.SetShowHelp(false)
-	l.SetFilteringEnabled(false)
-
 	// Setup viewport
 	vp := viewport.New(0, 0)
+
+	// Initialize clipboard
+	_ = clipboard.Init()
 
 	return &Model{
 		client:          NewClient(),
@@ -274,9 +275,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Copy current example to clipboard
 				if m.currentPage != nil && m.selectedExample < len(m.currentPage.Examples) {
 					cmd := cleanCommand(m.currentPage.Examples[m.selectedExample].Command)
-					if err := clipboard.WriteAll(cmd); err == nil {
-						m.showNotification("📋 Copied to clipboard!")
-					}
+					clipboard.Write(clipboard.FmtText, []byte(cmd))
+					m.showNotification("📋 Copied to clipboard!")
 				}
 
 			case "e", "enter":

@@ -3,14 +3,18 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/reflow/truncate"
 	"github.com/spf13/cobra"
+	"golang.design/x/clipboard"
 
 	"wut/internal/config"
 	"wut/internal/db"
@@ -104,55 +108,230 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	return showHistory(ctx, storage)
 }
 
+// deduplicateHistory filters out duplicate commands from history entries, keeping the most recent.
+func deduplicateHistory(entries []db.CommandExecution) []db.CommandExecution {
+	seen := make(map[string]bool)
+	var result []db.CommandExecution
+	for _, e := range entries {
+		cmdTrimmed := strings.TrimSpace(e.Command)
+		if !seen[cmdTrimmed] && cmdTrimmed != "" {
+			seen[cmdTrimmed] = true
+			result = append(result, e)
+		}
+	}
+	return result
+}
+
+type historyModel struct {
+	entries  []db.CommandExecution
+	cursor   int
+	page     int
+	pageSize int
+	numPages int
+	total    int
+	msg      string
+	width    int
+	height   int
+}
+
+func newHistoryModel(entries []db.CommandExecution, total int) historyModel {
+	err := clipboard.Init()
+	msg := ""
+	if err != nil {
+		msg = "Clipboard init failed (try installing xclip/xsel on Linux)"
+	}
+
+	numPages := int(math.Ceil(float64(len(entries)) / 10.0))
+	if numPages == 0 {
+		numPages = 1
+	}
+
+	return historyModel{
+		entries:  entries,
+		pageSize: 10,
+		numPages: numPages,
+		total:    total,
+		msg:      msg,
+	}
+}
+
+func (m historyModel) Init() tea.Cmd {
+	return nil
+}
+
+type clearMsg struct{}
+
+func tickClearMsg() tea.Cmd {
+	return tea.Tick(time.Second*2, func(_ time.Time) tea.Msg {
+		return clearMsg{}
+	})
+}
+
+func (m historyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	case clearMsg:
+		m.msg = ""
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+				if m.cursor < m.page*m.pageSize {
+					m.page--
+				}
+			}
+		case "down", "j":
+			if m.cursor < len(m.entries)-1 {
+				m.cursor++
+				if m.cursor >= (m.page+1)*m.pageSize {
+					m.page++
+				}
+			}
+		case "left", "h", "pgup":
+			if m.page > 0 {
+				m.page--
+				m.cursor = m.page * m.pageSize
+			}
+		case "right", "l", "pgdown":
+			if m.page < m.numPages-1 {
+				m.page++
+				m.cursor = m.page * m.pageSize
+			}
+		case "enter", "c", "y": // c for copy, y for yank, enter for copy
+			if m.cursor >= 0 && m.cursor < len(m.entries) {
+				targetCmd := m.entries[m.cursor].Command
+				clipboard.Write(clipboard.FmtText, []byte(targetCmd))
+				m.msg = "📋 Copied to clipboard"
+				return m, tickClearMsg()
+			}
+		}
+	}
+	return m, nil
+}
+
+func (m historyModel) View() string {
+	if len(m.entries) == 0 {
+		return "No execution logs found.\n"
+	}
+
+	start := m.page * m.pageSize
+	end := start + m.pageSize
+	if end > len(m.entries) {
+		end = len(m.entries)
+	}
+
+	// Calculate working width inside the border box
+	innerWidth := m.width - 6 // Border width (2) + Padding width (4)
+	if innerWidth < 20 {
+		innerWidth = 20
+	}
+
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
+	titleStr := headerStyle.Render("📜 Execution Log (Newest First)")
+
+	s := ""
+	if m.msg != "" {
+		// Expanded padding for alert to look balanced
+		alertStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Background(lipgloss.Color("#064E3B")).Padding(0, 3)
+		alertStr := alertStyle.Render(m.msg)
+		titleWidth := lipgloss.Width(titleStr)
+		alertWidth := lipgloss.Width(alertStr)
+
+		padding := innerWidth - titleWidth - alertWidth
+		if padding > 0 {
+			s = titleStr + strings.Repeat(" ", padding) + alertStr + "\n\n"
+		} else {
+			s = titleStr + " " + alertStr + "\n\n"
+		}
+	} else {
+		s = titleStr + "\n\n"
+	}
+
+	indexStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Width(4).Align(lipgloss.Right)
+	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+
+	// Calculation for truncated command length
+	availWidth := innerWidth - 27 // Account for index (4), time (15), cursor (2), and paddings
+	if availWidth < 10 {
+		availWidth = 10
+	}
+
+	for i := start; i < end; i++ {
+		entry := m.entries[i]
+		cursor := "  "
+		cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10B981"))
+
+		if m.cursor == i {
+			cursor = "👉"
+			cmdStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#3B82F6")).Padding(0, 1) // Highlight selected
+		}
+
+		timeStr := entry.Timestamp.Format("01-02 15:04")
+		dispCmd := entry.Command
+		if lipgloss.Width(dispCmd) > availWidth {
+			dispCmd = truncate.StringWithTail(dispCmd, uint(availWidth), "...")
+		}
+
+		s += fmt.Sprintf("%s %s %s   %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), metaStyle.Render("["+timeStr+"]"), cmdStyle.Render(dispCmd))
+	}
+
+	s += lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
+		fmt.Sprintf("Showing %d unique executions out of %d total recorded.", len(m.entries), m.total))
+	s += "\n\n"
+
+	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
+	s += footerStyle.Render(fmt.Sprintf("Page %d/%d", m.page+1, m.numPages))
+	s += lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(" | [↑/↓] Navigate | [←/→] Prev/Next Page | [c/enter] Copy | [q] Quit\n")
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#7C3AED")).
+		Padding(1, 2).
+		Width(m.width - 2)
+
+	return boxStyle.Render(strings.TrimRight(s, "\n"))
+}
+
 func showHistory(ctx context.Context, storage *db.Storage) error {
-	log := logger.With("history.show")
 	var entries []db.CommandExecution
 	var err error
 
 	if historySearch != "" {
-		log.Debug("searching history", "term", historySearch)
 		entries, err = searchHistoryOptimized(storage, historySearch, historyLimit)
 	} else {
-		log.Debug("getting history", "limit", historyLimit)
-		entries, err = storage.GetHistory(ctx, historyLimit)
+		// Pull more for pagination to be useful after deduplication
+		limit := historyLimit
+		if limit <= 20 {
+			limit = 1000 // default pull plenty to find unique entries
+		}
+		entries, err = storage.GetHistory(ctx, limit)
 	}
 
 	if err != nil {
 		return fmt.Errorf("failed to get history: %w", err)
 	}
 
+	// Filter out duplicate commands to make UI much cleaner
+	entries = deduplicateHistory(entries)
+
 	if len(entries) == 0 {
 		fmt.Println("No execution logs found.")
 		return nil
 	}
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
-	fmt.Printf("\n%s\n\n", headerStyle.Render("📜 Execution Log (Newest First)"))
-
-	for i, entry := range entries {
-		printHistoryEntry(i+1, entry)
+	total := getTotalCount(ctx, storage)
+	p := tea.NewProgram(newHistoryModel(entries, total))
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("error running history UI: %w", err)
 	}
-
-	fmt.Printf("\nShowing %d recent executions out of %d total recorded.\n", len(entries), getTotalCount(ctx, storage))
-	fmt.Println("\nTip: Use 'wut history --stats' for execution insights.")
 
 	metrics.RecordHistoryView()
 	return nil
-}
-
-func printHistoryEntry(index int, entry db.CommandExecution) {
-	indexStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Width(4).Align(lipgloss.Right)
-	cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10B981"))
-	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
-
-	fmt.Printf("%s  %s\n", indexStyle.Render(fmt.Sprintf("%d.", index)), cmdStyle.Render(entry.Command))
-
-	meta := fmt.Sprintf("[%s] Path: %s", entry.Timestamp.Format("2006-01-02 15:04:05"), entry.Dir)
-	if entry.Dir == "" {
-		meta = fmt.Sprintf("[%s] Processed", entry.Timestamp.Format("2006-01-02 15:04:05"))
-	}
-	fmt.Printf("     %s\n", metaStyle.Render(meta))
-	fmt.Println()
 }
 
 func searchHistoryOptimized(storage *db.Storage, query string, limit int) ([]db.CommandExecution, error) {
