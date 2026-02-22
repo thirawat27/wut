@@ -497,7 +497,6 @@ func ParallelFilter[T any](items []T, predicate func(T) bool, maxWorkers int) []
 	type result struct {
 		item  T
 		keep  bool
-		index int
 	}
 
 	results, _ := ParallelMap(items, func(item T) (result, error) {

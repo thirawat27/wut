@@ -14,7 +14,6 @@ import (
 
 	"wut/internal/config"
 	"wut/internal/db"
-	"wut/internal/util"
 )
 
 // dbCmd represents the db command
@@ -289,7 +288,7 @@ func formatSyncResult(result *db.SyncResult) string {
 			Foreground(lipgloss.Color("#EF4444")).
 			Render("Errors:"))
 		b.WriteString("\n")
-		for _, err := range result.Errors[:util.Min(len(result.Errors), 5)] {
+		for _, err := range result.Errors[:min(len(result.Errors), 5)] {
 			b.WriteString(lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#6B7280")).
 				Render(fmt.Sprintf("  • %v", err)))
@@ -307,6 +306,14 @@ func formatSyncResult(result *db.SyncResult) string {
 }
 
 // formatStatus formats the status for display
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func formatStatus(stats map[string]interface{}) string {
 	var b strings.Builder
 

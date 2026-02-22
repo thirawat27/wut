@@ -199,7 +199,7 @@ func (m *Manager) generateGitAliases() []Alias {
 		{Name: "grb", Command: "git rebase", Description: "Git rebase", Category: "git", AutoGen: true},
 		{Name: "grbi", Command: "git rebase -i", Description: "Git interactive rebase", Category: "git", AutoGen: true},
 		{Name: "gstp", Command: "git stash push", Description: "Git stash", Category: "git", AutoGen: true},
-		{Name: "gstp", Command: "git stash pop", Description: "Git stash pop", Category: "git", AutoGen: true},
+		{Name: "gstl", Command: "git stash pop", Description: "Git stash pop", Category: "git", AutoGen: true},
 	}
 }
 

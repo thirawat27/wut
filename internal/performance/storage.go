@@ -26,7 +26,6 @@ type OptimizedStorage struct {
 	path        string
 	writeQueue  chan *writeOp
 	readCache   *LRUCache[string, []byte]
-	mu          sync.RWMutex
 	batchConfig BatchConfig
 	stats       StorageStats
 	closed      atomic.Bool
@@ -399,16 +398,14 @@ func (s *OptimizedStorage) ScanPrefix(bucket string, prefix []byte, fn func(key,
 	})
 }
 
-// Stats returns storage statistics
-func (s *OptimizedStorage) Stats() StorageStats {
-	return StorageStats{
-		Writes:      s.stats.Writes,
-		Reads:       s.stats.Reads,
-		Batches:     s.stats.Batches,
-		CacheHits:   s.stats.CacheHits,
-		CacheMisses: s.stats.CacheMisses,
-		Errors:      s.stats.Errors,
-	}
+// Stats returns storage statistics as individual values
+func (s *OptimizedStorage) Stats() (writes, reads, batches, cacheHits, cacheMisses, errors uint64) {
+	return s.stats.Writes.Load(),
+		s.stats.Reads.Load(),
+		s.stats.Batches.Load(),
+		s.stats.CacheHits.Load(),
+		s.stats.CacheMisses.Load(),
+		s.stats.Errors.Load()
 }
 
 // CacheStats returns cache statistics

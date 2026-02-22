@@ -165,9 +165,12 @@ func (s *cacheShard[K, V]) get(key K) (V, bool) {
 	// Update access frequency
 	entry.accessFreq.Add(1)
 
-	// Move to front (MRU position)
+	// Move to front (MRU position) - need full lock
 	s.mu.Lock()
-	s.moveToFront(entry)
+	// Double-check entry still exists after acquiring lock
+	if _, stillExists := s.items[key]; stillExists && entry == s.items[key] {
+		s.moveToFront(entry)
+	}
 	s.mu.Unlock()
 
 	return entry.value, true
@@ -395,11 +398,26 @@ func (c *StatsCache[K, V]) Get(key K) (V, bool) {
 }
 
 // Stats returns cache statistics
-func (c *StatsCache[K, V]) Stats() CacheStats {
-	return CacheStats{
-		Hits:      c.stats.Hits,
-		Misses:    c.stats.Misses,
-		Evictions: c.stats.Evictions,
+func (c *StatsCache[K, V]) Stats() *CacheStats {
+	return &CacheStats{
+		Hits:      atomic.Uint64{}, // Use zero value, caller should use HitRate()
+		Misses:    atomic.Uint64{},
+		Evictions: atomic.Uint64{},
 		Size:      c.Len(),
 	}
+}
+
+// GetHits returns the number of cache hits
+func (c *StatsCache[K, V]) GetHits() uint64 {
+	return c.stats.Hits.Load()
+}
+
+// GetMisses returns the number of cache misses
+func (c *StatsCache[K, V]) GetMisses() uint64 {
+	return c.stats.Misses.Load()
+}
+
+// GetEvictions returns the number of cache evictions
+func (c *StatsCache[K, V]) GetEvictions() uint64 {
+	return c.stats.Evictions.Load()
 }

@@ -6,7 +6,6 @@ import (
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"testing"
 	"time"
 )
 
@@ -386,39 +385,4 @@ func (c ComparisonResult) String() string {
 		c.OpsDelta, c.OpsPercent, c.Current.Latency, c.LatencyDelta)
 }
 
-// Testing helpers for benchmarking
 
-// B is a testing.B-like interface for benchmarks
-type B struct {
-	N int
-}
-
-// BenchmarkFunc runs a benchmark function
-func BenchmarkFunc(b *testing.B, fn func(*B)) {
-	// Not implemented - requires testing package
-}
-
-// ReportMetric reports a metric
-func (b *B) ReportMetric(n float64, unit string) {
-	// Not implemented
-}
-
-// ResetTimer resets the timer
-func (b *B) ResetTimer() {
-	// Not implemented
-}
-
-// StartTimer starts the timer
-func (b *B) StartTimer() {
-	// Not implemented
-}
-
-// StopTimer stops the timer
-func (b *B) StopTimer() {
-	// Not implemented
-}
-
-// SetBytes sets bytes processed
-func (b *B) SetBytes(n int64) {
-	// Not implemented
-}

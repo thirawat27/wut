@@ -44,12 +44,13 @@ func NewSyncManager(storage *Storage) *SyncManager {
 	pool := concurrency.NewPool(concurrency.WithWorkerCount(runtime.NumCPU() * 2))
 	pool.Start()
 
-	return &SyncManager{
+	sm := &SyncManager{
 		client:     NewClient(),
 		storage:    storage,
 		log:        logger.With("db-sync"),
 		workerPool: pool,
 	}
+	return sm
 }
 
 // SetClient sets a custom client (useful for testing)

@@ -188,9 +188,7 @@ func NewParallelPipeline[T any](merger func([]T) ([]T, error)) *ParallelPipeline
 	if merger == nil {
 		merger = func(results []T) ([]T, error) {
 			var merged []T
-			for _, r := range results {
-				merged = append(merged, r)
-			}
+			merged = append(merged, results...)
 			return merged, nil
 		}
 	}

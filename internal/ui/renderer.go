@@ -3,26 +3,62 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"wut/internal/config"
-	"wut/internal/terminal"
 )
+
+// Capabilities represents terminal capabilities
+type Capabilities struct {
+	Supports256Colors bool
+	SupportsTrueColor bool
+	SupportsEmoji     bool
+	SupportsNerdFonts bool
+	Width             int
+	Height            int
+}
+
+// Detect detects terminal capabilities
+func detectCapabilities() *Capabilities {
+	return &Capabilities{
+		Supports256Colors: os.Getenv("TERM") != "dumb",
+		SupportsTrueColor: os.Getenv("COLORTERM") == "truecolor",
+		SupportsEmoji:     os.Getenv("LANG") != "C" && !strings.Contains(os.Getenv("TERM"), "linux"),
+		SupportsNerdFonts: false, // Conservative default
+		Width:             80,
+		Height:            24,
+	}
+}
+
+// ShouldUseASCII returns true if terminal doesn't support Unicode
+func (c *Capabilities) ShouldUseASCII() bool {
+	return !c.SupportsEmoji
+}
+
+// ShouldUseEmoji returns true if terminal supports emoji
+func (c *Capabilities) ShouldUseEmoji() bool {
+	return c.SupportsEmoji
+}
+
+// ShouldUseNerdFonts returns true if terminal supports nerd fonts
+func (c *Capabilities) ShouldUseNerdFonts() bool {
+	return c.SupportsNerdFonts
+}
 
 // Renderer provides UI rendering capabilities with terminal adaptation
 type Renderer struct {
 	config config.UIConfig
 	Styles *Styles
-	caps   *terminal.Capabilities
+	caps   *Capabilities
 }
 
 // NewRenderer creates a new UI renderer
 func NewRenderer(cfg config.UIConfig) *Renderer {
-	caps := terminal.Detect()
 	return &Renderer{
 		config: cfg,
 		Styles: DefaultStyles(),
-		caps:   caps,
+		caps:   detectCapabilities(),
 	}
 }
 
@@ -59,7 +95,7 @@ func (r *Renderer) PrintBox(content string) {
 // Icon returns an icon adapted to terminal capabilities
 func (r *Renderer) Icon(name string) string {
 	if r.caps == nil {
-		r.caps = terminal.Detect()
+		r.caps = detectCapabilities()
 	}
 	
 	icons := map[string]map[string]string{

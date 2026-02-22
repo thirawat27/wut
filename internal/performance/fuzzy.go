@@ -549,7 +549,6 @@ func (m *SuffixMatcher) HasSuffix(s string) bool {
 type BoyerMoore struct {
 	pattern  []byte
 	badChar  [256]int
-	goodSuffix []int
 }
 
 // NewBoyerMoore creates a new Boyer-Moore searcher

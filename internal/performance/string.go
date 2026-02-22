@@ -330,8 +330,9 @@ func (b *StringBuilder) WriteString(s string) {
 }
 
 // WriteByte appends a byte
-func (b *StringBuilder) WriteByte(c byte) {
+func (b *StringBuilder) WriteByte(c byte) error {
 	b.buf = append(b.buf, c)
+	return nil
 }
 
 // WriteBytes appends bytes

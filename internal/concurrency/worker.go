@@ -111,8 +111,20 @@ func (p *Pool) Stop() {
 	
 	p.wg.Wait()
 	
-	close(p.queue)
-	close(p.results)
+	// Safely close channels only if they haven't been closed
+	select {
+	case <-p.queue:
+		// Already closed
+	default:
+		close(p.queue)
+	}
+	
+	select {
+	case <-p.results:
+		// Already closed
+	default:
+		close(p.results)
+	}
 }
 
 // Submit submits a task to the pool
@@ -263,7 +275,6 @@ func Filter[T any](ctx context.Context, items []T, predicate func(T) bool, worke
 	type result struct {
 		item  T
 		keep  bool
-		index int
 	}
 	
 	results, err := Map(ctx, items, func(item T) (result, error) {

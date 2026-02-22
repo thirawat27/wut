@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
-	"wut/internal/core"
 	"wut/internal/logger"
 	"wut/internal/metrics"
 	"wut/internal/ui"
@@ -52,12 +51,7 @@ func runExplain(cmd *cobra.Command, args []string) error {
 	cfg := config.Get()
 
 	// Parse the command
-	parser := core.NewParser()
-	parsed, err := parser.Parse(command)
-	if err != nil {
-		log.Warn("failed to parse command", "error", err)
-		// Continue with basic explanation
-	}
+	parsed := parseCommand(command)
 
 	// Generate explanation
 	explanation, err := generateExplanation(ctx, parsed, cfg)
@@ -115,7 +109,22 @@ type Example struct {
 	Description string
 }
 
-func generateExplanation(ctx context.Context, parsed *core.ParsedCommand, cfg *config.Config) (*Explanation, error) {
+// ParsedCommand represents a parsed command
+type ParsedCommand struct {
+	Command string
+	Args    []string
+	Flags   []ParsedFlag
+	Raw     string
+}
+
+// ParsedFlag represents a parsed flag
+type ParsedFlag struct {
+	Name    string
+	Value   string
+	IsShort bool
+}
+
+func generateExplanation(ctx context.Context, parsed *ParsedCommand, cfg *config.Config) (*Explanation, error) {
 	// This is a simplified implementation
 	// In production, this would use a comprehensive command database
 
@@ -227,7 +236,62 @@ func displayExplanation(exp *Explanation, cfg *config.Config) error {
 
 // Helper functions for explanation generation
 
-func generateSummary(parsed *core.ParsedCommand) string {
+func parseCommand(command string) *ParsedCommand {
+	parts := strings.Fields(command)
+	if len(parts) == 0 {
+		return &ParsedCommand{Raw: command}
+	}
+
+	parsed := &ParsedCommand{
+		Command: parts[0],
+		Raw:     command,
+	}
+
+	for i := 1; i < len(parts); i++ {
+		part := parts[i]
+		if strings.HasPrefix(part, "--") {
+			// Long flag
+			flagParts := strings.SplitN(part, "=", 2)
+			flag := ParsedFlag{
+				Name:    strings.TrimPrefix(flagParts[0], "--"),
+				IsShort: false,
+			}
+			if len(flagParts) > 1 {
+				flag.Value = flagParts[1]
+			}
+			parsed.Flags = append(parsed.Flags, flag)
+		} else if strings.HasPrefix(part, "-") && len(part) > 1 {
+			// Short flag(s)
+			if len(part) > 2 && part[2] != '=' {
+				// Multiple short flags like -rf
+				for j := 1; j < len(part); j++ {
+					parsed.Flags = append(parsed.Flags, ParsedFlag{
+						Name:    string(part[j]),
+						IsShort: true,
+					})
+				}
+			} else {
+				// Single short flag with optional value
+				flagParts := strings.SplitN(part, "=", 2)
+				flag := ParsedFlag{
+					Name:    strings.TrimPrefix(flagParts[0], "-"),
+					IsShort: true,
+				}
+				if len(flagParts) > 1 {
+					flag.Value = flagParts[1]
+				}
+				parsed.Flags = append(parsed.Flags, flag)
+			}
+		} else {
+			// Regular argument
+			parsed.Args = append(parsed.Args, part)
+		}
+	}
+
+	return parsed
+}
+
+func generateSummary(parsed *ParsedCommand) string {
 	if parsed.Command == "" {
 		return "Unknown command"
 	}
@@ -236,12 +300,12 @@ func generateSummary(parsed *core.ParsedCommand) string {
 	return fmt.Sprintf("Executes %s", parsed.Command)
 }
 
-func generateDescription(parsed *core.ParsedCommand) string {
+func generateDescription(parsed *ParsedCommand) string {
 	// In production, this would look up from a command database
 	return fmt.Sprintf("The %s command is used to perform operations.", parsed.Command)
 }
 
-func extractArguments(parsed *core.ParsedCommand) []Argument {
+func extractArguments(parsed *ParsedCommand) []Argument {
 	var args []Argument
 	for _, arg := range parsed.Args {
 		args = append(args, Argument{
@@ -253,7 +317,7 @@ func extractArguments(parsed *core.ParsedCommand) []Argument {
 	return args
 }
 
-func extractFlagsV2(parsed *core.ParsedCommand) []Flag {
+func extractFlagsV2(parsed *ParsedCommand) []Flag {
 	var flags []Flag
 	for _, f := range parsed.Flags {
 		flags = append(flags, Flag{
@@ -267,7 +331,7 @@ func extractFlagsV2(parsed *core.ParsedCommand) []Flag {
 	return flags
 }
 
-func generateExamples(parsed *core.ParsedCommand) []Example {
+func generateExamples(parsed *ParsedCommand) []Example {
 	return []Example{
 		{
 			Command:     parsed.Raw,
@@ -276,7 +340,7 @@ func generateExamples(parsed *core.ParsedCommand) []Example {
 	}
 }
 
-func generateWarnings(parsed *core.ParsedCommand) []string {
+func generateWarnings(parsed *ParsedCommand) []string {
 	var warnings []string
 	
 	// Check for dangerous patterns
@@ -302,7 +366,7 @@ func generateWarnings(parsed *core.ParsedCommand) []string {
 	return warnings
 }
 
-func generateTips(parsed *core.ParsedCommand) []string {
+func generateTips(parsed *ParsedCommand) []string {
 	var tips []string
 	
 	cmd := strings.ToLower(parsed.Command)
@@ -319,7 +383,7 @@ func generateTips(parsed *core.ParsedCommand) []string {
 	return tips
 }
 
-func checkIfDangerous(parsed *core.ParsedCommand) bool {
+func checkIfDangerous(parsed *ParsedCommand) bool {
 	cmd := strings.ToLower(parsed.Raw)
 	
 	dangerousPatterns := []string{
@@ -341,7 +405,7 @@ func checkIfDangerous(parsed *core.ParsedCommand) bool {
 	return false
 }
 
-func calculateDangerLevel(parsed *core.ParsedCommand) string {
+func calculateDangerLevel(parsed *ParsedCommand) string {
 	if !checkIfDangerous(parsed) {
 		return "safe"
 	}
@@ -361,7 +425,7 @@ func calculateDangerLevel(parsed *core.ParsedCommand) string {
 	return "medium"
 }
 
-func generateAlternatives(parsed *core.ParsedCommand) []string {
+func generateAlternatives(parsed *ParsedCommand) []string {
 	cmd := strings.ToLower(parsed.Command)
 	
 	alternatives := map[string][]string{

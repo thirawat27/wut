@@ -68,7 +68,7 @@ func (p *StringPool) Put(b []byte) {
 	if cap(b) > 4096 { // 4KB
 		return // Let GC collect large slices
 	}
-	p.pool.Put(b)
+	p.pool.Put(&b)
 }
 
 // ObjectPool is a generic object pool using atomic operations
@@ -201,7 +201,8 @@ func (p *SlicePool[T]) Put(s []T) {
 	if cap(s) > 10000 {
 		return
 	}
-	p.pool.Put(s[:0])
+	s = s[:0]
+	p.pool.Put(&s)
 }
 
 // CacheEntry represents a cached value with expiration
@@ -234,8 +235,9 @@ func (b *FastStringBuilder) WriteString(s string) {
 }
 
 // WriteByte appends a byte
-func (b *FastStringBuilder) WriteByte(c byte) {
+func (b *FastStringBuilder) WriteByte(c byte) error {
 	b.buf = append(b.buf, c)
+	return nil
 }
 
 // Write appends bytes

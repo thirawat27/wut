@@ -2,7 +2,6 @@
 package db
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -49,8 +48,11 @@ type CategoryStat struct {
 
 // AddHistory adds a command to the history
 func (s *Storage) AddHistory(ctx context.Context, command string) error {
-	if s == nil || s.db == nil {
-		return fmt.Errorf("storage not initialized")
+	if s == nil {
+		return fmt.Errorf("storage is nil")
+	}
+	if s.db == nil {
+		return fmt.Errorf("storage database not initialized")
 	}
 	
 	// Check if command already exists
@@ -269,47 +271,4 @@ func (s *Storage) GetHistoryStats(ctx context.Context) (*HistoryStats, error) {
 	return stats, nil
 }
 
-// Helper function to parse command category
-func getCommandCategory(cmd string) string {
-	parts := strings.Fields(cmd)
-	if len(parts) == 0 {
-		return "other"
-	}
-	
-	mainCmd := parts[0]
-	
-	// Common categories
-	switch mainCmd {
-	case "git", "svn", "hg":
-		return "vcs"
-	case "docker", "kubectl", "helm":
-		return "container"
-	case "npm", "yarn", "pnpm", "cargo", "pip", "go":
-		return "package"
-	case "ls", "cd", "pwd", "mkdir", "rm", "cp", "mv":
-		return "filesystem"
-	case "ssh", "scp", "curl", "wget":
-		return "network"
-	case "ps", "top", "kill", "htop":
-		return "process"
-	default:
-		return "other"
-	}
-}
 
-// scanLines is a custom split function for bufio.Scanner
-func scanLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
-	if atEOF && len(data) == 0 {
-		return 0, nil, nil
-	}
-	if i := strings.Index(string(data), "\n"); i >= 0 {
-		return i + 1, data[0:i], nil
-	}
-	if atEOF {
-		return len(data), data, nil
-	}
-	return 0, nil, nil
-}
-
-// bufioScanner is not used but kept for compatibility
-var _ = bufio.Scanner{}

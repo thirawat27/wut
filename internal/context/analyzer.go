@@ -54,7 +54,10 @@ func (a *Analyzer) Analyze() (*Context, error) {
 	// Get working directory
 	wd, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get working directory: %w", err)
+	}
+	if wd == "" {
+		return nil, fmt.Errorf("working directory is empty")
 	}
 	a.context.WorkingDir = wd
 	
@@ -179,23 +182,20 @@ func (a *Analyzer) detectProjectType() {
 	}
 	a.context.ProjectFiles = projectFiles
 	
-	// Detect project type based on files
-	typePatterns := map[string][]string{
-		"nodejs":    {"package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml"},
+	// Detect project type based on files (priority order)
+	// Check primary project files first
+	primaryPatterns := map[string][]string{
+		"go":        {"go.mod"},
+		"nodejs":    {"package.json"},
 		"python":    {"requirements.txt", "setup.py", "pyproject.toml", "Pipfile"},
-		"go":        {"go.mod", "go.sum"},
-		"rust":      {"Cargo.toml", "Cargo.lock"},
-		"ruby":      {"Gemfile", "Gemfile.lock"},
-		"java":      {"pom.xml", "build.gradle"},
+		"rust":      {"Cargo.toml"},
+		"ruby":      {"Gemfile"},
+		"java":      {"pom.xml", "build.gradle", "build.gradle.kts"},
 		"dotnet":    {"*.csproj", "*.sln"},
-		"docker":    {"Dockerfile", "docker-compose.yml", "docker-compose.yaml"},
-		"terraform": {"*.tf", "*.tfvars"},
-		"ansible":   {"ansible.cfg", "inventory", "playbook.yml"},
-		"kubernetes": {"*.yaml", "*.yml"},
 	}
 	
-	// Check for specific files
-	for projectType, patterns := range typePatterns {
+	// Check primary patterns first
+	for projectType, patterns := range primaryPatterns {
 		for _, pattern := range patterns {
 			if matchPattern(projectFiles, pattern) {
 				a.context.ProjectType = projectType
@@ -204,7 +204,24 @@ func (a *Analyzer) detectProjectType() {
 		}
 	}
 	
-	// Check for git repo
+	// Check secondary patterns (docker, terraform, etc.)
+	secondaryPatterns := map[string][]string{
+		"docker":     {"Dockerfile", "docker-compose.yml", "docker-compose.yaml", ".dockerignore"},
+		"terraform":  {"*.tf", "*.tfvars", "main.tf"},
+		"ansible":    {"ansible.cfg", "inventory", "playbook.yml", "playbook.yaml"},
+		"kubernetes": {"*.yaml", "*.yml", "k8s", "manifests"},
+	}
+	
+	for projectType, patterns := range secondaryPatterns {
+		for _, pattern := range patterns {
+			if matchPattern(projectFiles, pattern) {
+				a.context.ProjectType = projectType
+				return
+			}
+		}
+	}
+	
+	// Check for git repo last
 	if a.context.IsGitRepo {
 		a.context.ProjectType = "git"
 		return

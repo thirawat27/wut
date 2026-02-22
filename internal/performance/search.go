@@ -171,7 +171,6 @@ func (idx *InvertedIndex) Search(query string, limit int) []SearchResult {
 // SearchCache provides cached search results
 type SearchCache struct {
 	cache *LRUCache[string, CachedSearch]
-	mu    sync.RWMutex
 }
 
 // CachedSearch represents cached search results
@@ -440,8 +439,8 @@ func (ms *MeasuredSearcher) Search(query string, limit int) []SearchResult {
 }
 
 // Metrics returns search metrics
-func (ms *MeasuredSearcher) Metrics() SearchMetrics {
-	return *ms.metrics
+func (ms *MeasuredSearcher) Metrics() *SearchMetrics {
+	return ms.metrics
 }
 
 // DocumentStore provides document storage and retrieval

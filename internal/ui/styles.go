@@ -66,3 +66,15 @@ func Cyanf(format string, a ...interface{}) string {
 func HiBlackf(format string, a ...interface{}) string {
 	return HiBlack(fmt.Sprintf(format, a...))
 }
+
+// Styles holds UI styles for rendering
+type Styles struct {
+	Title lipgloss.Style
+}
+
+// DefaultStyles returns default UI styles
+func DefaultStyles() *Styles {
+	return &Styles{
+		Title: lipgloss.NewStyle().Bold(true).Foreground(ColorCyan),
+	}
+}

@@ -4,19 +4,20 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
 	"wut/internal/config"
-	"wut/internal/ui"
-	appctx "wut/internal/context"
 	"wut/internal/corrector"
 	"wut/internal/db"
 	"wut/internal/logger"
-	"wut/internal/suggest"
-	"wut/internal/workflow"
+	appctx "wut/internal/context"
+	"wut/internal/smart"
+	"wut/internal/ui"
 )
 
 // smartCmd provides intelligent, context-aware command suggestions
@@ -47,7 +48,10 @@ func init() {
 }
 
 func runSmart(cmd *cobra.Command, args []string) error {
-	ctx := context.Background()
+	// Use shorter timeout to ensure responsiveness
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	
 	log := logger.With("smart")
 
 	// Get query from args
@@ -56,11 +60,15 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		query = strings.Join(args, " ")
 	}
 
-	// Detect context
+	// Detect context with timeout
 	analyzer := appctx.NewAnalyzer()
 	appCtx, err := analyzer.Analyze()
 	if err != nil {
 		log.Warn("failed to detect context", "error", err)
+		appCtx = &appctx.Context{
+			WorkingDir:  ".",
+			ProjectType: "unknown",
+		}
 	}
 
 	// Show context header
@@ -80,66 +88,96 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Get suggestions from multiple sources
-	var suggestions []SmartSuggestion
-
-	// 1. Workflow suggestions
-	wfEngine := workflow.NewEngine()
-	if query == "" {
-		// Show quick actions and workflows
-		quickActions := wfEngine.GetQuickActions(appCtx)
-		for _, action := range quickActions {
-			suggestions = append(suggestions, SmartSuggestion{
-				Command:     action.Command,
-				Description: action.Description,
-				Source:      "⚡ Quick",
-				Icon:        action.Icon,
-			})
-		}
-	}
-
-	// 2. History-based suggestions
+	// Initialize storage with timeout check
 	cfg := config.Get()
-	storage, err := db.NewStorage(cfg.Database.Path)
-	if err == nil {
-		defer storage.Close()
-
-		suggester := suggest.New(storage)
-		historyResults, err := suggester.Suggest(ctx, query, smartLimit)
-		if err == nil {
-			for _, r := range historyResults {
-				suggestions = append(suggestions, SmartSuggestion{
-					Command:     r.Command,
-					Description: fmt.Sprintf("Used %d times", int(r.Score/10)),
-					Source:      "📜 History",
-					Score:       r.Score,
-				})
-			}
+	var storage *db.Storage
+	
+	// Try to open storage with timeout
+	storageCh := make(chan *db.Storage, 1)
+	storageErrCh := make(chan error, 1)
+	
+	go func() {
+		s, err := db.NewStorage(cfg.Database.Path)
+		if err != nil {
+			storageErrCh <- err
+			return
 		}
+		storageCh <- s
+	}()
+	
+	select {
+	case storage = <-storageCh:
+		// Successfully opened
+		defer storage.Close()
+	case err := <-storageErrCh:
+		log.Warn("failed to initialize storage, continuing without history", "error", err)
+		storage = nil
+	case <-time.After(500 * time.Millisecond):
+		// Timeout opening database
+		log.Warn("storage initialization timeout, continuing without history")
+		storage = nil
 	}
 
-	// 3. Context-specific suggestions
-	contextSuggestions := getContextSuggestions(appCtx, query)
-	suggestions = append(suggestions, contextSuggestions...)
+	// Create smart engine
+	engine := smart.NewEngine(storage)
+	
+	// Get intelligent suggestions with timeout
+	suggestionsCh := make(chan []smart.Suggestion, 1)
+	var suggestErr error
+	
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error("panic in suggest", "recover", r)
+			}
+		}()
+		sugs, err := engine.Suggest(ctx, query, appCtx, smartLimit)
+		if err != nil {
+			suggestErr = err
+			return
+		}
+		suggestionsCh <- sugs
+	}()
+	
+	var suggestions []smart.Suggestion
+	select {
+	case suggestions = <-suggestionsCh:
+		// Got suggestions
+	case <-ctx.Done():
+		log.Warn("suggestion timeout, using fallback")
+		suggestions = engine.GetFallbackSuggestions(appCtx, smartLimit)
+	}
+
+	if suggestErr != nil {
+		log.Error("failed to get suggestions", "error", suggestErr)
+		// Try fallback
+		suggestions = engine.GetFallbackSuggestions(appCtx, smartLimit)
+	}
 
 	// Display suggestions
 	if len(suggestions) == 0 {
-		fmt.Println("No suggestions found. Try a different query.")
-		return nil
+		// Always show fallback suggestions instead of empty
+		suggestions = engine.GetFallbackSuggestions(appCtx, smartLimit)
 	}
 
-	printSuggestions(suggestions[:min(len(suggestions), smartLimit)])
+	printSmartSuggestions(suggestions)
+
+	// Record this query in history (async, don't block)
+	if storage != nil {
+		recordCmd := "wut smart"
+		if query != "" {
+			recordCmd += " " + query
+		}
+		go func() {
+			recordCtx, recordCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+			defer recordCancel()
+			if err := storage.AddHistory(recordCtx, recordCmd); err != nil {
+				log.Debug("failed to record history", "error", err)
+			}
+		}()
+	}
 
 	return nil
-}
-
-// SmartSuggestion represents a smart suggestion
-type SmartSuggestion struct {
-	Command     string
-	Description string
-	Source      string
-	Score       float64
-	Icon        string
 }
 
 func printContextInfo(ctx *appctx.Context) {
@@ -154,19 +192,33 @@ func printContextInfo(ctx *appctx.Context) {
 	fmt.Println()
 	fmt.Println(headerStyle.Render("📍 Context"))
 
+	// Get folder name from working directory
+	folderName := filepath.Base(ctx.WorkingDir)
+	if folderName == "." || folderName == "/" || folderName == "\\" {
+		folderName = ctx.WorkingDir
+	}
+
 	info := []string{
-		fmt.Sprintf("Project: %s", ctx.ProjectType),
+		fmt.Sprintf("Project: %s", folderName),
+	}
+
+	// Also show project type if detected
+	if ctx.ProjectType != "unknown" && ctx.ProjectType != "git" {
+		info = append(info, fmt.Sprintf("Type: %s", ctx.ProjectType))
 	}
 
 	if ctx.IsGitRepo {
 		info = append(info, fmt.Sprintf("Branch: %s", ctx.GitBranch))
-	}
-
-	if ctx.GitStatus.Ahead > 0 {
-		info = append(info, fmt.Sprintf("↑ %d commits ahead", ctx.GitStatus.Ahead))
-	}
-	if ctx.GitStatus.Behind > 0 {
-		info = append(info, fmt.Sprintf("↓ %d commits behind", ctx.GitStatus.Behind))
+		
+		if ctx.GitStatus.Ahead > 0 {
+			info = append(info, fmt.Sprintf("↑ %d commits ahead", ctx.GitStatus.Ahead))
+		}
+		if ctx.GitStatus.Behind > 0 {
+			info = append(info, fmt.Sprintf("↓ %d commits behind", ctx.GitStatus.Behind))
+		}
+		if !ctx.GitStatus.IsClean {
+			info = append(info, "📝 Has uncommitted changes")
+		}
 	}
 
 	for _, line := range info {
@@ -196,85 +248,53 @@ func printCorrection(c *corrector.Correction) {
 	}
 }
 
-func printSuggestions(suggestions []SmartSuggestion) {
-	for i, s := range suggestions {
+func printSmartSuggestions(suggestions []smart.Suggestion) {
+	// Group suggestions by source
+	bySource := make(map[string][]smart.Suggestion)
+	for _, s := range suggestions {
+		bySource[s.Source] = append(bySource[s.Source], s)
+	}
+
+	// Print header
+	fmt.Println(lipgloss.NewStyle().Bold(true).Render("💡 Smart Suggestions:"))
+	fmt.Println()
+
+	// Print suggestions with source grouping
+	printed := 0
+	for _, s := range suggestions {
 		icon := s.Icon
 		if icon == "" {
 			icon = "•"
 		}
 
-		sourceColor := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6B7280")).
-			Render(s.Source)
-
-		cmdColor := lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#10B981")).
-			Render(s.Command)
-
-		fmt.Printf("%s %s %s\n", icon, cmdColor, sourceColor)
-		if s.Description != "" {
-			fmt.Printf("   %s\n", s.Description)
+		// Color based on score
+		var cmdColor lipgloss.Style
+		if s.Score >= 1.5 {
+			cmdColor = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10B981")) // High score - green
+		} else if s.Score >= 1.0 {
+			cmdColor = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#3B82F6")) // Medium score - blue
+		} else {
+			cmdColor = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#6B7280")) // Low score - gray
 		}
 
-		if i < len(suggestions)-1 {
+		sourceColor := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#9CA3AF")).
+			Render(s.Source)
+
+		fmt.Printf("%s %s %s\n", icon, cmdColor.Render(s.Command), sourceColor)
+		
+		if s.Description != "" {
+			descStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6B7280"))
+			fmt.Printf("   %s\n", descStyle.Render(s.Description))
+		}
+
+		printed++
+		if printed < len(suggestions) {
 			fmt.Println()
 		}
 	}
-}
-
-func getContextSuggestions(ctx *appctx.Context, query string) []SmartSuggestion {
-	var suggestions []SmartSuggestion
-
-	// Add context-specific commands based on project type
-	switch ctx.ProjectType {
-	case "go":
-		suggestions = append(suggestions, []SmartSuggestion{
-			{Command: "go mod tidy", Description: "Clean up module dependencies", Source: "🎯 Go"},
-			{Command: "go test ./...", Description: "Run all tests", Source: "🎯 Go"},
-			{Command: "go build ./...", Description: "Build all packages", Source: "🎯 Go"},
-			{Command: "go run .", Description: "Run current package", Source: "🎯 Go"},
-			{Command: "go fmt ./...", Description: "Format all Go files", Source: "🎯 Go"},
-			{Command: "go vet ./...", Description: "Run static analysis", Source: "🎯 Go"},
-		}...)
-
-	case "nodejs":
-		suggestions = append(suggestions, []SmartSuggestion{
-			{Command: "npm install", Description: "Install dependencies", Source: "🎯 Node"},
-			{Command: "npm run dev", Description: "Start dev server", Source: "🎯 Node"},
-			{Command: "npm run build", Description: "Build for production", Source: "🎯 Node"},
-			{Command: "npm test", Description: "Run test suite", Source: "🎯 Node"},
-			{Command: "npm run lint", Description: "Run linter", Source: "🎯 Node"},
-		}...)
-
-	case "docker":
-		suggestions = append(suggestions, []SmartSuggestion{
-			{Command: "docker-compose up -d", Description: "Start services", Source: "🎯 Docker"},
-			{Command: "docker-compose down", Description: "Stop services", Source: "🎯 Docker"},
-			{Command: "docker-compose logs -f", Description: "Follow logs", Source: "🎯 Docker"},
-			{Command: "docker build -t myapp .", Description: "Build image", Source: "🎯 Docker"},
-		}...)
-	}
-
-	// Filter by query if provided
-	if query != "" {
-		var filtered []SmartSuggestion
-		q := strings.ToLower(query)
-		for _, s := range suggestions {
-			if strings.Contains(strings.ToLower(s.Command), q) ||
-			   strings.Contains(strings.ToLower(s.Description), q) {
-				filtered = append(filtered, s)
-			}
-		}
-		return filtered
-	}
-
-	return suggestions
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
+	
+	fmt.Println()
+	fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Tip: Use 'wut smart <query>' to search for specific commands"))
 }

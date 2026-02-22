@@ -173,7 +173,7 @@ func (p *ResponseBufferPool) Get() []byte {
 
 // Put returns a buffer to the pool
 func (p *ResponseBufferPool) Put(buf []byte) {
-	p.pool.Put(buf)
+	p.pool.Put(&buf)
 }
 
 // FastReadAll reads response body efficiently
@@ -406,7 +406,6 @@ type ConnectionPool struct {
 	network string
 	addrs   []string
 	conns   chan net.Conn
-	mu      sync.RWMutex
 }
 
 // NewConnectionPool creates a new connection pool
