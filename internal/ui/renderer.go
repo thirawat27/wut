@@ -49,7 +49,6 @@ func (c *Capabilities) ShouldUseNerdFonts() bool {
 // Renderer provides UI rendering capabilities with terminal adaptation
 type Renderer struct {
 	config config.UIConfig
-	Styles *Styles
 	caps   *Capabilities
 }
 
@@ -57,7 +56,6 @@ type Renderer struct {
 func NewRenderer(cfg config.UIConfig) *Renderer {
 	return &Renderer{
 		config: cfg,
-		Styles: DefaultStyles(),
 		caps:   detectCapabilities(),
 	}
 }
@@ -67,7 +65,7 @@ func (r *Renderer) PrintHeader(title string) {
 	if r.caps.ShouldUseASCII() {
 		fmt.Println("=== " + title + " ===")
 	} else {
-		fmt.Println(r.Styles.Title.Render(title))
+		fmt.Println(StyleTitle.Render(title))
 	}
 }
 

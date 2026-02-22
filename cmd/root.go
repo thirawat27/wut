@@ -6,13 +6,18 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
-	"github.com/spf13/cobra"
 	"wut/internal/config"
 	"wut/internal/health"
 	"wut/internal/logger"
 	"wut/internal/metrics"
+	"wut/internal/ui"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -30,8 +35,8 @@ var (
 	rootCmd = &cobra.Command{
 		Use:   "wut",
 		Short: "Command Helper",
-		Long: `WUT is a command line assistant that helps you 
-find the right commands, correct typos, and learn new shell commands.`,
+		Long: `The Smart Command Line Assistant That Actually Understands You
+`,
 		Version: "", // Will be set in init()
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			return initialize(cmd.Context())
@@ -41,6 +46,14 @@ find the right commands, correct typos, and learn new shell commands.`,
 		},
 	}
 )
+
+// applyPremiumHelpRecursively applies the premium UI help styling to all commands
+func applyPremiumHelpRecursively(c *cobra.Command) {
+	setupPremiumHelp(c)
+	for _, sub := range c.Commands() {
+		applyPremiumHelpRecursively(sub)
+	}
+}
 
 // Execute adds all child commands to the root command and sets flags appropriately.
 // This is called by main.main(). It only needs to happen once to the rootCmd.
@@ -62,6 +75,9 @@ func Execute() {
 	// Set context for root command
 	rootCmd.SetContext(ctx)
 
+	// Apply modern UI scheme to all registered commands
+	applyPremiumHelpRecursively(rootCmd)
+
 	if err := rootCmd.Execute(); err != nil {
 		logger.Error("command execution failed", "error", err)
 		os.Exit(1)
@@ -73,6 +89,135 @@ func init() {
 
 	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "", "config file (default is $HOME/.config/wut/config.yaml)")
 	rootCmd.PersistentFlags().BoolVarP(&debug, "debug", "d", false, "enable debug mode")
+}
+
+func setupPremiumHelp(cmd *cobra.Command) {
+	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
+		if c.Name() == "wut" {
+			bannerStyle := lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#8B5CF6")). // Electric Blue background
+				Padding(1, 4).                         // Top/bottom 1, left/right 4
+				Border(lipgloss.NormalBorder()).
+				BorderForeground(lipgloss.Color("#8B5CF6")). // Violet border
+				MarginBottom(1)
+
+			desc := "⚡ WUT (What ?)\nThe Smart Command Line Assistant That Actually Understands You"
+			fmt.Printf("\n%s\n", bannerStyle.Render(desc))
+		} else {
+			fmt.Printf("\n%s\n", ui.Title(fmt.Sprintf("%s - %s", c.CommandPath(), c.Short)))
+			if c.Long != "" && c.Long != c.Short {
+				fmt.Printf("%s\n\n", ui.Secondary(c.Long))
+			} else {
+				fmt.Println()
+			}
+		}
+
+		fmt.Printf("%s\n", ui.Title("Usage:"))
+		if c.Runnable() {
+			fmt.Printf("  %s %s\n", ui.Primary(c.UseLine()), ui.Warning("[flags]"))
+		}
+		if c.HasAvailableSubCommands() {
+			fmt.Printf("  %s %s\n", ui.Primary(c.CommandPath()), ui.Success("[command]"))
+		}
+		fmt.Println()
+
+		if len(c.Example) > 0 {
+			fmt.Printf("%s\n", ui.Title("Examples:"))
+			fmt.Printf("%s\n\n", ui.Accent(c.Example))
+		}
+
+		if c.HasAvailableSubCommands() {
+			var coreCmds []*cobra.Command
+			var shortcuts []*cobra.Command
+
+			for _, sub := range c.Commands() {
+				if sub.IsAvailableCommand() {
+					if len(sub.Name()) <= 1 {
+						shortcuts = append(shortcuts, sub)
+					} else {
+						coreCmds = append(coreCmds, sub)
+					}
+				}
+			}
+
+			if len(coreCmds) > 0 {
+				fmt.Printf("%s\n", ui.Title("Core Commands:"))
+				for _, sub := range coreCmds {
+					pad := 20 - len(sub.Name())
+					if pad < 2 {
+						pad = 2
+					}
+					fmt.Printf("  %s%s%s\n", ui.Success(sub.Name()), strings.Repeat(" ", pad), ui.Muted(sub.Short))
+				}
+				fmt.Println()
+			}
+
+			if len(shortcuts) > 0 {
+				fmt.Printf("%s\n", ui.Title("Shortcuts:"))
+				for _, sub := range shortcuts {
+					pad := 20 - len(sub.Name())
+					if pad < 2 {
+						pad = 2
+					}
+					fmt.Printf("  %s%s%s\n", ui.Success(sub.Name()), strings.Repeat(" ", pad), ui.Muted(sub.Short))
+				}
+				fmt.Println()
+			}
+		}
+
+		printFlagsGroup := func(title string, flags *pflag.FlagSet) {
+			visibleCount := 0
+			flags.VisitAll(func(f *pflag.Flag) {
+				if !f.Hidden {
+					visibleCount++
+				}
+			})
+
+			if visibleCount > 0 {
+				fmt.Printf("%s\n", ui.Title(title))
+				flags.VisitAll(func(f *pflag.Flag) {
+					if f.Hidden {
+						return
+					}
+					name := fmt.Sprintf("      --%s", f.Name)
+					if f.Shorthand != "" {
+						name = fmt.Sprintf("  -%s, --%s", f.Shorthand, f.Name)
+					}
+					if f.Value.Type() != "bool" {
+						if f.Value.Type() == "string" {
+							name += " string"
+						} else {
+							name += " " + f.Value.Type()
+						}
+					}
+					pad := 28 - len(name)
+					if pad < 2 {
+						pad = 2
+					}
+					fmt.Printf("%s%s%s\n", ui.Warning(name), strings.Repeat(" ", pad), ui.Muted(f.Usage))
+				})
+				fmt.Println()
+			}
+		}
+
+		if c.HasAvailableLocalFlags() {
+			printFlagsGroup("Flags:", c.LocalFlags())
+		}
+
+		if c.HasAvailableInheritedFlags() {
+			printFlagsGroup("Global Flags:", c.InheritedFlags())
+		}
+
+		if c.HasAvailableSubCommands() {
+			part1 := ui.Primary(fmt.Sprintf("\"%s ", c.CommandPath()))
+			part2 := ui.Success("[command]")
+			part3 := ui.Warning(" --help\"")
+
+			fmt.Printf("%s%s%s%s%s\n", ui.Muted("Use "), part1, part2, part3, ui.Muted(" for more information about a command."))
+		}
+	})
 }
 
 // SetVersionInfo updates the version string after variables are set
