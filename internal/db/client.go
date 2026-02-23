@@ -10,10 +10,12 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"wut/internal/config"
 )
 
 const (
-	baseRawURL = "https://raw.githubusercontent.com/tldr-pages/tldr/main/pages"
+	baseRawURL = "https://raw.githubusercontent.com/tldr-pages/tldr/main"
 	// Platforms available in tldr-pages
 	PlatformCommon  = "common"
 	PlatformLinux   = "linux"
@@ -30,6 +32,7 @@ const (
 type Client struct {
 	httpClient    *http.Client
 	baseURL       string
+	language      string
 	storage       *Storage
 	offlineMode   bool
 	autoDetect    bool
@@ -42,6 +45,7 @@ type Client struct {
 type Page struct {
 	Name        string
 	Platform    string
+	Language    string
 	Description string
 	Examples    []Example
 	RawContent  string
@@ -84,13 +88,27 @@ func WithHTTPClient(client *http.Client) ClientOption {
 	}
 }
 
+// WithLanguage sets the preferred language
+func WithLanguage(lang string) ClientOption {
+	return func(c *Client) {
+		c.language = lang
+	}
+}
+
 // NewClient creates a new TLDR API client
 func NewClient(opts ...ClientOption) *Client {
+	cfg := config.Get()
+	lang := cfg.TLDR.Language
+	if lang == "" {
+		lang = "en"
+	}
+
 	c := &Client{
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
 		baseURL:       baseRawURL,
+		language:      lang,
 		offlineMode:   false,
 		autoDetect:    true,
 		cacheInMemory: true,
@@ -139,7 +157,7 @@ func (c *Client) IsOnline(ctx context.Context) bool {
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	url := fmt.Sprintf("%s/%s/%s.md", c.baseURL, PlatformCommon, "ls")
+	url := fmt.Sprintf("%s/pages/%s/%s.md", c.baseURL, PlatformCommon, "ls")
 	req, err := http.NewRequestWithContext(ctx, "HEAD", url, nil)
 	if err != nil {
 		return false
@@ -157,7 +175,11 @@ func (c *Client) IsOnline(ctx context.Context) bool {
 // GetPage retrieves a TLDR page for a specific command and platform
 // Auto-detects online/offline and falls back to local storage automatically
 func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, error) {
-	cacheKey := fmt.Sprintf("%s/%s", platform, command)
+	lang := c.language
+	if lang == "" {
+		lang = "en"
+	}
+	cacheKey := fmt.Sprintf("%s/%s/%s", lang, platform, command)
 
 	// Check memory cache first
 	if c.cacheInMemory {
@@ -171,7 +193,7 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 
 	// Check local storage second
 	if c.storage != nil {
-		page, err := c.storage.GetPage(command, platform)
+		page, err := c.storage.GetPage(command, platform, lang)
 		if err == nil {
 			// Cache in memory
 			if c.cacheInMemory {
@@ -189,8 +211,23 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 	}
 
 	// Try to fetch from remote
-	url := fmt.Sprintf("%s/%s/%s.md", c.baseURL, platform, command)
+	var langDir string
+	if lang == "en" {
+		langDir = "pages"
+	} else {
+		langDir = "pages." + lang
+	}
+	url := fmt.Sprintf("%s/%s/%s/%s.md", c.baseURL, langDir, platform, command)
 	content, err := c.fetch(ctx, url)
+
+	if err != nil && lang != "en" {
+		// Fallback to english if not found
+		fallbackURL := fmt.Sprintf("%s/pages/%s/%s.md", c.baseURL, platform, command)
+		content, err = c.fetch(ctx, fallbackURL)
+		if err == nil {
+			lang = "en"
+		}
+	}
 
 	if err != nil {
 		// Network error - auto fall back to offline mode if autoDetect is enabled
@@ -202,7 +239,7 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 	}
 
 	// Parse and save
-	page := c.parsePage(content, command, platform)
+	page := c.parsePage(content, command, platform, lang)
 
 	// Save to local storage if available
 	if c.storage != nil {
@@ -284,13 +321,17 @@ func (c *Client) GetPageAnyPlatform(ctx context.Context, command string) (*Page,
 	}
 
 	// Check local storage second
+	lang := c.language
+	if lang == "" {
+		lang = "en"
+	}
 	if c.storage != nil {
-		page, err := c.storage.GetPageAnyPlatform(command)
+		page, err := c.storage.GetPageAnyPlatform(command, lang)
 		if err == nil {
 			// Cache in memory
 			if c.cacheInMemory {
 				c.cacheMu.Lock()
-				c.memoryCache[fmt.Sprintf("%s/%s", page.Platform, page.Name)] = page
+				c.memoryCache[fmt.Sprintf("%s/%s/%s", page.Language, page.Platform, page.Name)] = page
 				c.cacheMu.Unlock()
 			}
 			return page, nil
@@ -363,10 +404,14 @@ func (c *Client) fetch(ctx context.Context, url string) (string, error) {
 }
 
 // parsePage parses raw markdown content into a Page struct
-func (c *Client) parsePage(content, name, platform string) *Page {
+func (c *Client) parsePage(content, name, platform, language string) *Page {
+	if language == "" {
+		language = "en"
+	}
 	page := &Page{
 		Name:       name,
 		Platform:   platform,
+		Language:   language,
 		RawContent: content,
 		Examples:   []Example{},
 	}

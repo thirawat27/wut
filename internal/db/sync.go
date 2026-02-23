@@ -2,8 +2,14 @@
 package db
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -68,7 +74,208 @@ func (sm *SyncManager) Stop() {
 
 // SyncAll syncs all common commands to local storage
 func (sm *SyncManager) SyncAll(ctx context.Context) (*SyncResult, error) {
-	return sm.SyncCommands(ctx, nil)
+	// 1. Prefer local source if available
+	localPaths := []string{
+		"tldr-main",
+		filepath.Join("tldr-main", "tldr-main"),
+	}
+
+	for _, p := range localPaths {
+		if stat, err := os.Stat(filepath.Join(p, "pages")); err == nil && stat.IsDir() {
+			sm.log.Info("found local tldr directory, syncing from disk ...", "path", p)
+			return sm.SyncFromLocalDir(ctx, p)
+		}
+	}
+
+	// 2. Fallback to downloading the full archive
+	zipURL := "https://github.com/tldr-pages/tldr/releases/latest/download/tldr.zip"
+	sm.log.Info("syncing from remote zip archive ...")
+	return sm.SyncFromZip(ctx, zipURL)
+}
+
+// SyncFromLocalDir reads an extracted tldr-pages archive directory
+func (sm *SyncManager) SyncFromLocalDir(ctx context.Context, pagesDir string) (*SyncResult, error) {
+	start := time.Now()
+	var pages []*Page
+
+	sm.log.Info("reading local pages directory", "dir", pagesDir)
+
+	err := filepath.Walk(pagesDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() || !strings.HasSuffix(path, ".md") {
+			return nil
+		}
+
+		relPath, err := filepath.Rel(pagesDir, path)
+		if err != nil {
+			return nil
+		}
+
+		// Expect langDir/platform/command.md
+		parts := strings.Split(filepath.ToSlash(relPath), "/")
+		if len(parts) != 3 {
+			return nil
+		}
+
+		langDir := parts[0]
+		language := "en"
+		if strings.HasPrefix(langDir, "pages.") {
+			language = strings.TrimPrefix(langDir, "pages.")
+		} else if langDir != "pages" {
+			return nil
+		}
+
+		platform := parts[1]
+		command := strings.TrimSuffix(parts[2], ".md")
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			sm.log.Warn("failed to read local page", "file", path, "error", err)
+			return nil
+		}
+
+		page := sm.client.parsePage(string(content), command, platform, language)
+		pages = append(pages, page)
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed walking local pages dir: %w", err)
+	}
+
+	return sm.saveBatchPages(pages, start)
+}
+
+// SyncFromZip downloads the full TLDR database archive and imports it
+func (sm *SyncManager) SyncFromZip(ctx context.Context, zipURL string) (*SyncResult, error) {
+	start := time.Now()
+	sm.log.Info("downloading full tldr archive", "url", zipURL)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", zipURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request failed: %w", err)
+	}
+
+	resp, err := sm.client.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("download failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code downloading zip: %d", resp.StatusCode)
+	}
+
+	// Read full zip into memory
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read zip body: %w", err)
+	}
+
+	sm.log.Info("archive downloaded", "size", len(body))
+
+	zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	if err != nil {
+		return nil, fmt.Errorf("invalid zip file: %w", err)
+	}
+
+	var pages []*Page
+
+	for _, f := range zipReader.File {
+		// Only parse .md files
+		if !strings.HasSuffix(f.Name, ".md") {
+			continue
+		}
+
+		parts := strings.Split(f.Name, "/")
+		if len(parts) < 3 {
+			continue
+		}
+
+		fileName := parts[len(parts)-1]
+		platform := parts[len(parts)-2]
+		langDir := parts[len(parts)-3]
+
+		// For github release tldr.zip, valid pages are right under `pages/` or `pages.xx/`
+		language := "en"
+		if strings.HasPrefix(langDir, "pages.") {
+			language = strings.TrimPrefix(langDir, "pages.")
+		} else if langDir != "pages" {
+			continue
+		}
+
+		command := strings.TrimSuffix(fileName, ".md")
+
+		rc, err := f.Open()
+		if err != nil {
+			sm.log.Warn("failed to open file in zip", "file", f.Name, "error", err)
+			continue
+		}
+
+		contentBytes, err := io.ReadAll(rc)
+		rc.Close()
+
+		if err != nil {
+			sm.log.Warn("failed to read file in zip", "file", f.Name, "error", err)
+			continue
+		}
+
+		page := sm.client.parsePage(string(contentBytes), command, platform, language)
+		pages = append(pages, page)
+	}
+
+	return sm.saveBatchPages(pages, start)
+}
+
+func (sm *SyncManager) saveBatchPages(pages []*Page, start time.Time) (*SyncResult, error) {
+	sm.log.Info("parsed pages from source", "count", len(pages))
+
+	batchSize := 500
+	var savedCount int
+	var errors []error
+
+	for i := 0; i < len(pages); i += batchSize {
+		end := i + batchSize
+		if end > len(pages) {
+			end = len(pages)
+		}
+
+		batch := pages[i:end]
+		if err := sm.storage.SavePages(batch); err != nil {
+			errors = append(errors, fmt.Errorf("failed to save batch [%d:%d]: %w", i, end, err))
+			sm.log.Warn("batch save failed", "error", err)
+		} else {
+			savedCount += len(batch)
+		}
+	}
+
+	result := &SyncResult{
+		Downloaded: savedCount,
+		Failed:     len(pages) - savedCount,
+		Errors:     errors,
+		Duration:   time.Since(start),
+	}
+
+	// Update metadata
+	meta := &Metadata{
+		LastSync:   time.Now(),
+		TotalPages: savedCount,
+		Platforms:  []string{PlatformCommon, PlatformLinux, PlatformMacOS, PlatformWindows, PlatformAndroid, PlatformFreeBSD, PlatformNetBSD, PlatformOpenBSD, PlatformSunOS},
+	}
+	if err := sm.storage.SaveMetadata(meta); err != nil {
+		sm.log.Warn("failed to save metadata", "error", err)
+	}
+
+	sm.log.Info("sync completed",
+		"downloaded", result.Downloaded,
+		"failed", result.Failed,
+		"duration", result.Duration,
+	)
+
+	return result, nil
 }
 
 // SyncCommands syncs specific commands to local storage with high concurrency
@@ -279,21 +486,10 @@ func (sm *SyncManager) getPlatformCommands(ctx context.Context, platform string)
 }
 
 // SyncPopular syncs popular/common commands
+// We overwrite this to enforce complete download, solving "page not found" errors
 func (sm *SyncManager) SyncPopular(ctx context.Context) (*SyncResult, error) {
-	popularCommands := []string{
-		"git", "docker", "npm", "node", "python", "pip", "cargo",
-		"kubectl", "helm", "terraform", "ansible", "vagrant",
-		"ls", "cd", "pwd", "cat", "less", "head", "tail",
-		"grep", "find", "sed", "awk", "sort", "wc",
-		"tar", "zip", "unzip", "gzip",
-		"chmod", "chown", "mkdir", "rm", "cp", "mv",
-		"ps", "htop", "kill", "killall",
-		"ssh", "scp", "rsync", "curl", "wget", "ping", "netstat",
-		"vim", "vi", "nano",
-		"make", "cmake", "gcc", "clang",
-	}
-
-	return sm.SyncCommands(ctx, popularCommands)
+	sm.log.Info("SyncPopular was requested, upgrading to full sync for better offline support")
+	return sm.SyncAll(ctx)
 }
 
 // UpdateCommand updates a single command in local storage

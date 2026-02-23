@@ -25,6 +25,7 @@ type Storage struct {
 type StoredPage struct {
 	Name        string    `json:"name"`
 	Platform    string    `json:"platform"`
+	Language    string    `json:"language"`
 	Description string    `json:"description"`
 	Examples    []Example `json:"examples"`
 	RawContent  string    `json:"raw_content"`
@@ -78,6 +79,7 @@ func (s *Storage) SavePage(page *Page) error {
 	stored := StoredPage{
 		Name:        page.Name,
 		Platform:    page.Platform,
+		Language:    page.Language,
 		Description: page.Description,
 		Examples:    page.Examples,
 		RawContent:  page.RawContent,
@@ -89,7 +91,11 @@ func (s *Storage) SavePage(page *Page) error {
 		return fmt.Errorf("failed to marshal page: %w", err)
 	}
 
-	key := fmt.Sprintf("%s/%s", page.Platform, page.Name)
+	lang := page.Language
+	if lang == "" {
+		lang = "en"
+	}
+	key := fmt.Sprintf("%s/%s/%s", lang, page.Platform, page.Name)
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(tldrBucketName))
@@ -97,14 +103,58 @@ func (s *Storage) SavePage(page *Page) error {
 	})
 }
 
-// GetPage retrieves a TLDR page from local storage
-func (s *Storage) GetPage(name, platform string) (*Page, error) {
-	key := fmt.Sprintf("%s/%s", platform, name)
+// SavePages saves multiple TLDR pages to local storage in a single transaction
+func (s *Storage) SavePages(pages []*Page) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		for _, page := range pages {
+			stored := StoredPage{
+				Name:        page.Name,
+				Platform:    page.Platform,
+				Language:    page.Language,
+				Description: page.Description,
+				Examples:    page.Examples,
+				RawContent:  page.RawContent,
+				FetchedAt:   time.Now(),
+			}
+
+			data, err := json.Marshal(stored)
+			if err != nil {
+				return fmt.Errorf("failed to marshal page %s: %w", page.Name, err)
+			}
+
+			lang := page.Language
+			if lang == "" {
+				lang = "en"
+			}
+			key := fmt.Sprintf("%s/%s/%s", lang, page.Platform, page.Name)
+			if err := bucket.Put([]byte(key), data); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// GetPage retrieves a TLDR page from local storage for a specific language
+func (s *Storage) GetPage(name, platform, language string) (*Page, error) {
+	if language == "" {
+		language = "en"
+	}
+
+	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
 
 	var stored StoredPage
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(tldrBucketName))
 		data := bucket.Get([]byte(key))
+
+		// Fallback to English if not found
+		if data == nil && language != "en" {
+			fallbackKey := fmt.Sprintf("en/%s/%s", platform, name)
+			data = bucket.Get([]byte(fallbackKey))
+		}
+
 		if data == nil {
 			return fmt.Errorf("page not found")
 		}
@@ -117,6 +167,7 @@ func (s *Storage) GetPage(name, platform string) (*Page, error) {
 	return &Page{
 		Name:        stored.Name,
 		Platform:    stored.Platform,
+		Language:    stored.Language,
 		Description: stored.Description,
 		Examples:    stored.Examples,
 		RawContent:  stored.RawContent,
@@ -124,7 +175,7 @@ func (s *Storage) GetPage(name, platform string) (*Page, error) {
 }
 
 // GetPageAnyPlatform tries to get a page from any available platform in local storage
-func (s *Storage) GetPageAnyPlatform(name string) (*Page, error) {
+func (s *Storage) GetPageAnyPlatform(name, language string) (*Page, error) {
 	platforms := []string{
 		PlatformCommon,
 		PlatformLinux,
@@ -138,7 +189,7 @@ func (s *Storage) GetPageAnyPlatform(name string) (*Page, error) {
 	}
 
 	for _, platform := range platforms {
-		page, err := s.GetPage(name, platform)
+		page, err := s.GetPage(name, platform, language)
 		if err == nil {
 			return page, nil
 		}
@@ -148,8 +199,11 @@ func (s *Storage) GetPageAnyPlatform(name string) (*Page, error) {
 }
 
 // PageExists checks if a page exists in local storage
-func (s *Storage) PageExists(name, platform string) bool {
-	key := fmt.Sprintf("%s/%s", platform, name)
+func (s *Storage) PageExists(name, platform, language string) bool {
+	if language == "" {
+		language = "en"
+	}
+	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
 	exists := false
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
@@ -162,8 +216,11 @@ func (s *Storage) PageExists(name, platform string) bool {
 }
 
 // IsPageStale checks if a page is older than the given duration
-func (s *Storage) IsPageStale(name, platform string, maxAge time.Duration) bool {
-	key := fmt.Sprintf("%s/%s", platform, name)
+func (s *Storage) IsPageStale(name, platform, language string, maxAge time.Duration) bool {
+	if language == "" {
+		language = "en"
+	}
+	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
 	isStale := true
 
 	_ = s.db.View(func(tx *bbolt.Tx) error {
@@ -225,8 +282,11 @@ func (s *Storage) GetPagesByPlatform(platform string) ([]StoredPage, error) {
 }
 
 // DeletePage deletes a page from local storage
-func (s *Storage) DeletePage(name, platform string) error {
-	key := fmt.Sprintf("%s/%s", platform, name)
+func (s *Storage) DeletePage(name, platform, language string) error {
+	if language == "" {
+		language = "en"
+	}
+	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(tldrBucketName))
 		return bucket.Delete([]byte(key))
