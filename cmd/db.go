@@ -263,7 +263,6 @@ func formatSyncResult(result *db.SyncResult) string {
 	}{
 		{"Downloaded", result.Downloaded, "#10B981"},
 		{"Failed", result.Failed, "#EF4444"},
-		{"Skipped", result.Skipped, "#F59E0B"},
 	}
 
 	for _, s := range stats {

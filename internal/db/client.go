@@ -455,20 +455,17 @@ func (c *Client) GetAvailableCommands(ctx context.Context) ([]string, error) {
 // getDefaultCommands returns the default list of common commands
 func getDefaultCommands() []string {
 	return []string{
-		"git", "docker", "npm", "node", "python", "pip", "cargo", "rustc",
+		"git", "docker", "npm", "node", "python", "pip", "cargo",
 		"kubectl", "helm", "terraform", "ansible", "vagrant",
-		"ls", "cd", "pwd", "cat", "less", "more", "head", "tail",
-		"grep", "find", "sed", "awk", "sort", "uniq", "wc",
-		"tar", "zip", "unzip", "gzip", "gunzip",
-		"chmod", "chown", "chgrp", "ln", "mkdir", "rm", "cp", "mv",
-		"ps", "top", "htop", "kill", "killall",
+		"ls", "cd", "pwd", "cat", "less", "head", "tail",
+		"grep", "find", "sed", "awk", "sort", "wc",
+		"tar", "zip", "unzip", "gzip",
+		"chmod", "chown", "mkdir", "rm", "cp", "mv",
+		"ps", "htop", "kill", "killall",
 		"ssh", "scp", "rsync", "curl", "wget", "ping", "netstat",
-		"systemctl", "service", "crontab", "at",
-		"vim", "vi", "nano", "emacs", "code",
-		"apt", "yum", "dnf", "pacman", "brew",
-		"make", "cmake", "gcc", "g++", "clang",
-		"jq", "yq", "xmllint",
-		"ffmpeg", "convert", "pdftk",
+		"vim", "vi", "nano",
+		"make", "cmake", "gcc", "clang",
+		"ffmpeg",
 	}
 }
 

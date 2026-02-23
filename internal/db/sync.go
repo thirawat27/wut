@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -133,9 +134,13 @@ func (sm *SyncManager) SyncCommandsWithOptions(ctx context.Context, opts SyncOpt
 	// Process results
 	for i, res := range results {
 		if res != nil {
-			result.Failed++
-			result.Errors = append(result.Errors, fmt.Errorf("%s: %w", opts.Commands[i], res))
-			sm.log.Warn("failed to sync command", "command", opts.Commands[i], "error", res)
+			if strings.Contains(res.Error(), "page not found") {
+				result.Skipped++
+			} else {
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Errorf("%s: %w", opts.Commands[i], res))
+				sm.log.Warn("failed to sync command", "command", opts.Commands[i], "error", res)
+			}
 		} else {
 			result.Downloaded++
 		}
@@ -276,19 +281,16 @@ func (sm *SyncManager) getPlatformCommands(ctx context.Context, platform string)
 // SyncPopular syncs popular/common commands
 func (sm *SyncManager) SyncPopular(ctx context.Context) (*SyncResult, error) {
 	popularCommands := []string{
-		"git", "docker", "npm", "node", "python", "pip", "cargo", "rustc",
+		"git", "docker", "npm", "node", "python", "pip", "cargo",
 		"kubectl", "helm", "terraform", "ansible", "vagrant",
-		"ls", "cd", "pwd", "cat", "less", "more", "head", "tail",
-		"grep", "find", "sed", "awk", "sort", "uniq", "wc",
-		"tar", "zip", "unzip", "gzip", "gunzip",
-		"chmod", "chown", "chgrp", "ln", "mkdir", "rm", "cp", "mv",
-		"ps", "top", "htop", "kill", "killall",
+		"ls", "cd", "pwd", "cat", "less", "head", "tail",
+		"grep", "find", "sed", "awk", "sort", "wc",
+		"tar", "zip", "unzip", "gzip",
+		"chmod", "chown", "mkdir", "rm", "cp", "mv",
+		"ps", "htop", "kill", "killall",
 		"ssh", "scp", "rsync", "curl", "wget", "ping", "netstat",
-		"systemctl", "service", "crontab", "at",
-		"vim", "vi", "nano", "emacs", "code",
-		"apt", "yum", "dnf", "pacman", "brew",
-		"make", "cmake", "gcc", "g++", "clang",
-		"jq", "yq", "xmllint",
+		"vim", "vi", "nano",
+		"make", "cmake", "gcc", "clang",
 	}
 
 	return sm.SyncCommands(ctx, popularCommands)
