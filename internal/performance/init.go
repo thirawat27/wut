@@ -26,10 +26,10 @@ func MustValue[T any](v T, err error) T {
 }
 
 // Ptr returns pointer to value
-//
-//go:fix inline
+// Note: Using traditional approach for Go 1.21 compatibility
 func Ptr[T any](v T) *T {
-	return new(v)
+	result := v
+	return &result
 }
 
 // Deref dereferences pointer with default

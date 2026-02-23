@@ -55,7 +55,9 @@ func WithWorkerCount(n int) PoolOption {
 // WithQueueSize sets the queue size
 func WithQueueSize(n int) PoolOption {
 	return func(p *Pool) {
-		// This is handled in NewPool
+		if n > 0 {
+			p.queue = make(chan Task, n)
+		}
 	}
 }
 
@@ -65,7 +67,7 @@ func NewPool(opts ...PoolOption) *Pool {
 
 	p := &Pool{
 		workers: runtime.NumCPU(),
-		queue:   make(chan Task, 100),
+		queue:   make(chan Task, 100), // Default queue size
 		results: make(chan Result, 100),
 		ctx:     ctx,
 		cancel:  cancel,

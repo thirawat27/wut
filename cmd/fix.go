@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
@@ -27,7 +28,6 @@ WUT will detect typos, dangerous commands, and suggest alternatives.`,
 var (
 	fixCopy bool
 	fixList bool
-	fixSafe bool
 )
 
 func init() {
@@ -35,7 +35,6 @@ func init() {
 
 	fixCmd.Flags().BoolVarP(&fixCopy, "copy", "c", false, "copy corrected command to clipboard")
 	fixCmd.Flags().BoolVarP(&fixList, "list", "l", false, "list common typos")
-	fixCmd.Flags().BoolVar(&fixSafe, "safe", true, "check for dangerous commands")
 }
 
 func runFix(cmd *cobra.Command, args []string) error {
@@ -82,8 +81,10 @@ func runFix(cmd *cobra.Command, args []string) error {
 
 	// Copy to clipboard if requested
 	if fixCopy && correction.Corrected != "" {
-		// TODO: Implement clipboard copy
-		fmt.Println("(Copied to clipboard)")
+		if err := clipboard.WriteAll(correction.Corrected); err != nil {
+			return fmt.Errorf("failed to copy to clipboard: %w", err)
+		}
+		fmt.Printf("%s Copied to clipboard\n", ui.Success("✓"))
 	}
 
 	return nil

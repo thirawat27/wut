@@ -2,9 +2,11 @@
 package performance
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"time"
+
 	"github.com/cespare/xxhash/v2"
 )
 
@@ -91,7 +93,7 @@ func fastHash64[K comparable](key K) uint64 {
 			byte(k >> 32), byte(k >> 40), byte(k >> 48), byte(k >> 56)})
 	default:
 		// For other types, use stringification
-		return xxhash.Sum64String(any(key).(string))
+		return xxhash.Sum64String(fmt.Sprintf("%v", key))
 	}
 }
 
