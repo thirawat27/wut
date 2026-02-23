@@ -13,6 +13,8 @@ import (
 	"wut/internal/config"
 	"wut/internal/logger"
 	"wut/internal/ui"
+
+	"github.com/charmbracelet/huh"
 )
 
 // configCmd represents the config command
@@ -131,8 +133,220 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Default: show configuration
-	return showConfig()
+	// Default: show configuration wizard
+	return runConfigUI()
+}
+
+func runConfigUI() error {
+	cfg := config.Get()
+
+	// Convert numerical settings to strings for inputs
+	fuzzyDistance := strconv.Itoa(cfg.Fuzzy.MaxDistance)
+	fuzzyThreshold := strconv.FormatFloat(cfg.Fuzzy.Threshold, 'f', 2, 64)
+	uiPagination := strconv.Itoa(cfg.UI.Pagination)
+	dbSize := strconv.Itoa(cfg.Database.MaxSize)
+	tldrSyncInterval := strconv.Itoa(cfg.TLDR.AutoSyncInterval)
+	historyMaxEntries := strconv.Itoa(cfg.History.MaxEntries)
+	logMaxSize := strconv.Itoa(cfg.Logging.MaxSize)
+	logMaxAge := strconv.Itoa(cfg.Logging.MaxAge)
+
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewNote().
+				Title("WUT Configuration Wizards").
+				Description("Welcome to the WUT configuration wizard.\nPress Tab to navigate, Space to toggle, Enter to save settings."),
+		).Title("Welcome"),
+
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("UI Theme").
+				Options(
+					huh.NewOption("Auto", "auto"),
+					huh.NewOption("Light", "light"),
+					huh.NewOption("Dark", "dark"),
+				).
+				Value(&cfg.UI.Theme),
+			huh.NewConfirm().
+				Title("Show Confidence").
+				Description("Display the AI's confidence level for responses").
+				Value(&cfg.UI.ShowConfidence),
+			huh.NewConfirm().
+				Title("Show Explanations").
+				Description("Display detailed explanations for commands").
+				Value(&cfg.UI.ShowExplanations),
+			huh.NewConfirm().
+				Title("Syntax Highlighting").
+				Value(&cfg.UI.SyntaxHighlighting),
+			huh.NewInput().
+				Title("Pagination Size").
+				Value(&uiPagination),
+		).Title("User Interface"),
+
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Enable Fuzzy Matching").
+				Description("Enable typo correction and fuzzy searching").
+				Value(&cfg.Fuzzy.Enabled),
+			huh.NewConfirm().
+				Title("Case Sensitive").
+				Value(&cfg.Fuzzy.CaseSensitive),
+			huh.NewInput().
+				Title("Max Distance").
+				Description("Maximum Levenshtein distance for fuzzy matching").
+				Value(&fuzzyDistance),
+			huh.NewInput().
+				Title("Threshold (0.0 to 1.0)").
+				Description("Confidence threshold for matching").
+				Value(&fuzzyThreshold),
+		).Title("Fuzzy Matching"),
+
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("TLDR Pages Enabled").
+				Value(&cfg.TLDR.Enabled),
+			huh.NewConfirm().
+				Title("Offline Mode").
+				Description("Never attempt to fetch pages online").
+				Value(&cfg.TLDR.OfflineMode),
+			huh.NewConfirm().
+				Title("Auto Sync TLDR Pages").
+				Value(&cfg.TLDR.AutoSync),
+			huh.NewInput().
+				Title("Sync Interval (days)").
+				Value(&tldrSyncInterval),
+			huh.NewSelect[string]().
+				Title("Language").
+				Options(
+					huh.NewOption("English", "en"),
+					huh.NewOption("Thai", "th"),
+				).
+				Value(&cfg.TLDR.Language),
+		).Title("TLDR Pages"),
+
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Enable Context Analysis").
+				Description("Analyze working directory for better suggestions").
+				Value(&cfg.Context.Enabled),
+			huh.NewConfirm().
+				Title("Git Integration").
+				Description("Use Git status and history for context").
+				Value(&cfg.Context.GitIntegration),
+			huh.NewConfirm().
+				Title("Project Detection").
+				Description("Detect project type (Node, Go, Python, etc.)").
+				Value(&cfg.Context.ProjectDetection),
+			huh.NewConfirm().
+				Title("Environment Vars").
+				Value(&cfg.Context.EnvironmentVars),
+		).Title("Context Analysis"),
+
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Database Type").
+				Options(
+					huh.NewOption("bbolt", "bbolt"),
+					huh.NewOption("sqlite", "sqlite"),
+				).
+				Value(&cfg.Database.Type),
+			huh.NewInput().
+				Title("Max Size (MB)").
+				Value(&dbSize),
+			huh.NewConfirm().
+				Title("Backup Enabled").
+				Value(&cfg.Database.BackupEnabled),
+		).Title("Database Settings"),
+
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Track History").
+				Value(&cfg.History.Enabled),
+			huh.NewInput().
+				Title("Max Entries").
+				Value(&historyMaxEntries),
+			huh.NewConfirm().
+				Title("Track Frequency").
+				Value(&cfg.History.TrackFrequency),
+		).Title("History Settings"),
+
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Local Only").
+				Description("Never send data to external APIs").
+				Value(&cfg.Privacy.LocalOnly),
+			huh.NewConfirm().
+				Title("Encrypt Local Data").
+				Value(&cfg.Privacy.EncryptData),
+			huh.NewConfirm().
+				Title("Anonymize Commands").
+				Description("Remove sensitive data from command history").
+				Value(&cfg.Privacy.AnonymizeCommands),
+		).Title("Privacy Settings"),
+
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title("Log Level").
+				Options(
+					huh.NewOption("debug", "debug"),
+					huh.NewOption("info", "info"),
+					huh.NewOption("warn", "warn"),
+					huh.NewOption("error", "error"),
+				).
+				Value(&cfg.Logging.Level),
+			huh.NewInput().
+				Title("Max Size (MB)").
+				Value(&logMaxSize),
+			huh.NewInput().
+				Title("Max Age (days)").
+				Value(&logMaxAge),
+		).Title("Logging Settings"),
+	).
+		WithTheme(huh.ThemeDracula())
+
+	err := form.Run()
+	if err != nil {
+		if err == huh.ErrUserAborted {
+			fmt.Println("Configuration cancelled.")
+			return nil
+		}
+		return err
+	}
+
+	// Parsing strings back to numerical values
+	if v, err := strconv.Atoi(fuzzyDistance); err == nil {
+		cfg.Fuzzy.MaxDistance = v
+	}
+	if v, err := strconv.ParseFloat(fuzzyThreshold, 64); err == nil {
+		cfg.Fuzzy.Threshold = v
+	}
+	if v, err := strconv.Atoi(uiPagination); err == nil {
+		cfg.UI.Pagination = v
+	}
+	if v, err := strconv.Atoi(dbSize); err == nil {
+		cfg.Database.MaxSize = v
+	}
+	if v, err := strconv.Atoi(tldrSyncInterval); err == nil {
+		cfg.TLDR.AutoSyncInterval = v
+	}
+	if v, err := strconv.Atoi(historyMaxEntries); err == nil {
+		cfg.History.MaxEntries = v
+	}
+	if v, err := strconv.Atoi(logMaxSize); err == nil {
+		cfg.Logging.MaxSize = v
+	}
+	if v, err := strconv.Atoi(logMaxAge); err == nil {
+		cfg.Logging.MaxAge = v
+	}
+
+	// Save the config
+	config.Set(cfg)
+	if err := config.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Println()
+	fmt.Println("✅ Configuration saved successfully!")
+	return nil
 }
 
 func showConfig() error {
