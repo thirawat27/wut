@@ -44,7 +44,8 @@ param(
     [switch]$NoInit,
     [switch]$NoShell,
     [switch]$Force,
-    [switch]$Uninstall
+    [switch]$Uninstall,
+    [switch]$Help
 )
 
 # Configuration
@@ -53,7 +54,7 @@ $script:Binary = "wut"
 $script:ErrorActionPreference = "Stop"
 
 # Colors for PowerShell
-$Colors = @{
+$script:Colors = @{
     Red = "`e[31m"
     Green = "`e[32m"
     Yellow = "`e[33m"
@@ -65,21 +66,36 @@ $Colors = @{
 
 function Write-Header {
     Write-Host ""
-    Write-Host "$($Colors.Cyan)$($Colors.Bold) _    _ _____ _____$($Colors.NC)"
-    Write-Host "$($Colors.Cyan)$($Colors.Bold)| |  | |_   _|  __ \$($Colors.NC)"
-    Write-Host "$($Colors.Cyan)$($Colors.Bold)| |  | | | | | |  | |$($Colors.NC)"
-    Write-Host "$($Colors.Cyan)$($Colors.Bold)| |  | | | | | |  | |$($Colors.NC)"
-    Write-Host "$($Colors.Cyan)$($Colors.Bold)| |__| |_| |_| |__| |$($Colors.NC)"
-    Write-Host "$($Colors.Cyan)$($Colors.Bold) \____/|_____|_____/$($Colors.NC)"
+    Write-Host "$($script:Colors.Cyan)$($script:Colors.Bold) _    _ _____ _____$($script:Colors.NC)"
+    Write-Host "$($script:Colors.Cyan)$($script:Colors.Bold)| |  | |_   _|  __ \$($script:Colors.NC)"
+    Write-Host "$($script:Colors.Cyan)$($script:Colors.Bold)| |  | | | | | |  | |$($script:Colors.NC)"
+    Write-Host "$($script:Colors.Cyan)$($script:Colors.Bold)| |  | | | | | |  | |$($script:Colors.NC)"
+    Write-Host "$($script:Colors.Cyan)$($script:Colors.Bold)| |__| |_| |_| |__| |$($script:Colors.NC)"
+    Write-Host "$($script:Colors.Cyan)$($script:Colors.Bold) \____/|_____|_____/$($script:Colors.NC)"
     Write-Host ""
-    Write-Host "$($Colors.Blue)AI-Powered Command Helper for Windows$($Colors.NC)"
+    Write-Host "$($script:Colors.Blue)AI-Powered Command Helper for Windows$($script:Colors.NC)"
     Write-Host ""
 }
 
-function Write-Info { param([string]$Message) Write-Host "$($Colors.Blue)[INFO]$($Colors.NC) $Message" }
-function Write-Success { param([string]$Message) Write-Host "$($Colors.Green)[OK]$($Colors.NC) $Message" }
-function Write-Warn { param([string]$Message) Write-Host "$($Colors.Yellow)[WARN]$($Colors.NC) $Message" }
-function Write-Error { param([string]$Message) Write-Host "$($Colors.Red)[ERROR]$($Colors.NC) $Message" -ForegroundColor Red }
+function Write-Info { 
+    param([string]$Message) 
+    Write-Host "$($script:Colors.Blue)[INFO]$($script:Colors.NC) $Message" 
+}
+
+function Write-Success { 
+    param([string]$Message) 
+    Write-Host "$($script:Colors.Green)[OK]$($script:Colors.NC) $Message" 
+}
+
+function Write-Warn { 
+    param([string]$Message) 
+    Write-Host "$($script:Colors.Yellow)[WARN]$($script:Colors.NC) $Message" 
+}
+
+function Write-Error { 
+    param([string]$Message) 
+    Write-Host "$($script:Colors.Red)[ERROR]$($script:Colors.NC) $Message" -ForegroundColor Red 
+}
 
 function Test-Admin {
     $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
@@ -87,16 +103,15 @@ function Test-Admin {
 }
 
 function Get-Architecture {
-    $arch = [System.Environment]::Is64BitOperatingSystem
     $processor = [System.Environment]::GetEnvironmentVariable("PROCESSOR_ARCHITECTURE")
     
     switch ($processor) {
-        "AMD64" { return "amd64" }
+        "AMD64" { return "x86_64" }
         "ARM64" { return "arm64" }
-        "x86" { return "386" }
+        "x86" { return "i386" }
         default { 
-            if ($arch) { return "amd64" }
-            else { return "386" }
+            if ([System.Environment]::Is64BitOperatingSystem) { return "x86_64" }
+            else { return "i386" }
         }
     }
 }
@@ -185,13 +200,21 @@ function Install-Wut {
     $installDir = Get-InstallDirectory -PreferredDir $InstallDir
     Write-Info "Install directory: $installDir"
     
+    # Normalize version (remove 'v' prefix if present for URL construction)
+    $versionTag = $Version
+    if ($Version -like "v*") {
+        $versionTag = $Version.Substring(1)
+    }
+    
+    # Archive name format: wut_<VERSION>_Windows_<ARCH>.zip
+    $archiveName = "$($script:Binary)_${versionTag}_Windows_${arch}.zip"
+    
     # Download URL
-    $fileName = "$($script:Binary)-windows-$arch.exe"
     if ($Version -eq "latest") {
-        $downloadUrl = "https://github.com/$($script:Repo)/releases/latest/download/$fileName"
+        $downloadUrl = "https://github.com/$($script:Repo)/releases/latest/download/$archiveName"
     }
     else {
-        $downloadUrl = "https://github.com/$($script:Repo)/releases/download/$Version/$fileName"
+        $downloadUrl = "https://github.com/$($script:Repo)/releases/download/$Version/$archiveName"
     }
     
     # Check existing
@@ -207,72 +230,67 @@ function Install-Wut {
         Remove-Item $targetPath -Force
     }
     
-    # Download with progress
-    Write-Info "Downloading from: $downloadUrl"
-    $tempFile = [System.IO.Path]::GetTempFileName() + ".exe"
+    # Create temp directory
+    $tempDir = Join-Path $env:TEMP "wut-install-$([Guid]::NewGuid().ToString())"
+    New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
     
     try {
-        # Use WebClient for progress
-        $webClient = New-Object System.Net.WebClient
-        $webClient.Headers.Add("User-Agent", "WUT-Installer")
+        # Download archive
+        $archivePath = Join-Path $tempDir $archiveName
+        Write-Info "Downloading from: $downloadUrl"
         
-        $lastProgress = 0
-        Register-ObjectEvent -InputObject $webClient -EventName DownloadProgressChanged -Action {
-            $progress = $EventArgs.ProgressPercentage
-            if ($progress -gt $lastProgress -and $progress % 10 -eq 0) {
-                Write-Info "Download progress: $progress%"
-                $script:lastProgress = $progress
-            }
-        } | Out-Null
-        
-        $webClient.DownloadFile($downloadUrl, $tempFile)
-        Unregister-Event -SourceIdentifier $webClient.GetHashCode() -ErrorAction SilentlyContinue
-        
-        Write-Success "Download complete"
-    }
-    catch {
-        # Try alternative URLs
-        $altUrls = @(
-            $downloadUrl -replace "windows-$arch", "windows-amd64",
-            $downloadUrl -replace "windows-$arch", "windows-386",
-            "https://github.com/$($script:Repo)/releases/download/$Version/wut.exe"
-        )
-        
-        $downloaded = $false
-        foreach ($url in $altUrls) {
-            try {
-                Write-Info "Trying: $url"
-                Invoke-WebRequest -Uri $url -OutFile $tempFile -UseBasicParsing -TimeoutSec 30
-                $downloaded = $true
-                break
-            }
-            catch {
-                continue
-            }
+        try {
+            $webClient = New-Object System.Net.WebClient
+            $webClient.Headers.Add("User-Agent", "WUT-Installer")
+            $webClient.DownloadFile($downloadUrl, $archivePath)
+            Write-Success "Download complete"
+        }
+        catch {
+            throw "Failed to download archive from: $downloadUrl"
         }
         
-        if (!$downloaded) {
-            throw "Failed to download binary from all sources"
+        # Extract archive
+        Write-Info "Extracting archive..."
+        try {
+            # Use Expand-Archive (PowerShell 5.1+)
+            Expand-Archive -Path $archivePath -DestinationPath $tempDir -Force
+            Write-Success "Extraction complete"
+        }
+        catch {
+            throw "Failed to extract archive: $_"
+        }
+        
+        # Find the binary in extracted files
+        $extractedBinary = Get-ChildItem -Path $tempDir -Recurse -Filter "$($script:Binary).exe" | Select-Object -First 1
+        
+        if (!$extractedBinary) {
+            throw "Binary not found in archive"
+        }
+        
+        # Install
+        Move-Item $extractedBinary.FullName $targetPath -Force
+        Write-Success "Installed to: $targetPath"
+        
+        # Add to PATH
+        Add-ToPath -Directory $installDir
+        
+        # Verify
+        try {
+            $installedVersion = & $targetPath --version 2>$null | Select-Object -First 1
+            Write-Success "Version: $installedVersion"
+        }
+        catch {
+            Write-Warn "Could not verify installation"
+        }
+        
+        return $targetPath
+    }
+    finally {
+        # Cleanup
+        if (Test-Path $tempDir) {
+            Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
-    
-    # Install
-    Move-Item $tempFile $targetPath -Force
-    Write-Success "Installed to: $targetPath"
-    
-    # Add to PATH
-    Add-ToPath -Directory $installDir
-    
-    # Verify
-    try {
-        $installedVersion = & $targetPath --version 2>$null | Select-Object -First 1
-        Write-Success "Version: $installedVersion"
-    }
-    catch {
-        Write-Warn "Could not verify installation"
-    }
-    
-    return $targetPath
 }
 
 function Setup-PowerShellProfile {
@@ -290,7 +308,7 @@ function Setup-PowerShellProfile {
         New-Item -ItemType File -Path $profilePath -Force | Out-Null
     }
     
-    $wutProfile = @"
+    $wutProfile = @'
 
 # WUT key bindings
 if (Get-Command wut -ErrorAction SilentlyContinue) {
@@ -302,15 +320,15 @@ if (Get-Command wut -ErrorAction SilentlyContinue) {
     
     # Ctrl+G to open WUT with current line
     Set-PSReadLineKeyHandler -Chord Ctrl+G -ScriptBlock {
-        `$line = `$null
-        `$cursor = `$null
-        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]`$line, [ref]`$cursor)
+        $line = $null
+        $cursor = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cursor)
         [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-        [Microsoft.PowerShell.PSConsoleReadLine]::Insert("wut `$line")
+        [Microsoft.PowerShell.PSConsoleReadLine]::Insert("wut $line")
         [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
     }
 }
-"@
+'@
     
     $profileContent = Get-Content $profilePath -Raw -ErrorAction SilentlyContinue
     if ($profileContent -notlike "*WUT key bindings*") {
@@ -433,38 +451,6 @@ function Main {
         Write-Info "Run: Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser"
     }
     
-    # Suggest better installation methods first
-    Write-Info "Checking for better installation methods..."
-    
-    # Check if winget is available
-    $wingetAvailable = $null -ne (Get-Command winget -ErrorAction SilentlyContinue)
-    
-    # Check if running from local file (installer mode)
-    $isLocalFile = $MyInvocation.MyCommand.Path -and (Test-Path $MyInvocation.MyCommand.Path)
-    
-    if (!$isLocalFile -and $wingetAvailable -and $Version -eq "latest") {
-        Write-Host ""
-        Write-Host "$($Colors.Cyan)💡 Recommendation:$($Colors.NC)"
-        Write-Host "   This script downloads and installs from GitHub releases."
-        Write-Host ""
-        Write-Host "$($Colors.Green)Better options available:$($Colors.NC)"
-        Write-Host ""
-        Write-Host "   1. WinGet (Recommended - auto-updates):"
-        Write-Host "      winget install thirawat27.wut"
-        Write-Host ""
-        Write-Host "   2. Download installer from GitHub:"
-        Write-Host "      https://github.com/$script:Repo/releases"
-        Write-Host ""
-        Write-Host "$($Colors.Yellow)Continue with script installation? [Y/n]$($Colors.NC) " -NoNewline
-        $response = Read-Host
-        if ($response -match '^[Nn]$') {
-            Write-Host ""
-            Write-Info "Cancelled. Use one of the recommended methods above."
-            return
-        }
-        Write-Host ""
-    }
-    
     try {
         # Install
         $installedPath = Install-Wut -Version $Version -InstallDir $InstallDir
@@ -477,7 +463,7 @@ function Main {
         
         # Success message
         Write-Host ""
-        Write-Host "$($Colors.Green)$($Colors.Bold)✓ Installation complete!$($Colors.NC)"
+        Write-Host "$($script:Colors.Green)$($script:Colors.Bold)Installation complete!$($script:Colors.NC)"
         Write-Host ""
         Write-Host "Quick start:"
         Write-Host "  wut --help       Show help"

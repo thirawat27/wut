@@ -45,34 +45,15 @@ warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 die() { error "$1"; exit 1; }
 
-# Progress bar
-show_progress() {
-    local duration=$1
-    local prefix="${2:-Downloading}"
-    local width=40
-    local progress=0
-    
-    while [ $progress -lt 100 ]; do
-        local filled=$((progress * width / 100))
-        local empty=$((width - filled))
-        local bar=$(printf '%*s' "$filled" '' | tr ' ' '█')
-        local space=$(printf '%*s' "$empty" '' | tr ' ' '░')
-        printf '\r%s [%s%s] %d%%' "$prefix" "$bar" "$space" "$progress"
-        progress=$((progress + 2))
-        sleep "${duration}"
-    done
-    printf '\r%s [%s] 100%%\n' "$prefix" "$(printf '%*s' "$width" '' | tr ' ' '█')"
-}
-
 # Detect OS
 detect_os() {
     local os
     case "$(uname -s)" in
-        Linux*)     os="linux" ;;
-        Darwin*)    os="darwin" ;;
-        FreeBSD*)   os="freebsd" ;;
-        OpenBSD*)   os="openbsd" ;;
-        NetBSD*)    os="netbsd" ;;
+        Linux*)     os="Linux" ;;
+        Darwin*)    os="Darwin" ;;
+        FreeBSD*)   os="FreeBSD" ;;
+        OpenBSD*)   os="OpenBSD" ;;
+        NetBSD*)    os="NetBSD" ;;
         *)          die "Unsupported operating system: $(uname -s)" ;;
     esac
     echo "$os"
@@ -82,10 +63,10 @@ detect_os() {
 detect_arch() {
     local arch
     case "$(uname -m)" in
-        x86_64|amd64)   arch="amd64" ;;
+        x86_64|amd64)   arch="x86_64" ;;
         arm64|aarch64)  arch="arm64" ;;
-        armv7l|armv7)   arch="arm" ;;
-        i386|i686)      arch="386" ;;
+        armv7l|armv7)   arch="armv7" ;;
+        i386|i686)      arch="i386" ;;
         riscv64)        arch="riscv64" ;;
         *)              die "Unsupported architecture: $(uname -m)" ;;
     esac
@@ -140,55 +121,78 @@ check_existing() {
     fi
 }
 
-# Download binary
+# Download and extract binary
 download_binary() {
     local version="$1"
     local os="$2"
     local arch="$3"
     local install_dir="$4"
     
-    local download_url
-    if [ "$version" = "latest" ]; then
-        download_url="https://github.com/${REPO}/releases/latest/download/${BINARY}-${os}-${arch}"
-    else
-        download_url="https://github.com/${REPO}/releases/download/${version}/${BINARY}-${os}-${arch}"
+    # Normalize version (remove 'v' prefix if present for URL construction)
+    local version_tag="$version"
+    if [[ "$version" == v* ]]; then
+        version_tag="${version#v}"
     fi
     
-    # Try common variations if exact match fails
-    local urls=(
-        "$download_url"
-        "${download_url}.exe"
-        "https://github.com/${REPO}/releases/download/${version}/${BINARY}_${version}_${os}_${arch}.tar.gz"
-    )
+    # Archive name format: wut_<VERSION>_<OS>_<ARCH>.tar.gz
+    local archive_name="${BINARY}_${version_tag}_${os}_${arch}.tar.gz"
+    local download_url
     
-    local temp_file
-    temp_file=$(mktemp)
+    if [ "$version" = "latest" ]; then
+        download_url="https://github.com/${REPO}/releases/latest/download/${archive_name}"
+    else
+        download_url="https://github.com/${REPO}/releases/download/${version}/${archive_name}"
+    fi
     
-    for url in "${urls[@]}"; do
-        info "Downloading from: $url"
-        
-        if command -v curl >/dev/null 2>&1; then
-            if curl -fsSL --progress-bar "$url" -o "$temp_file" 2>/dev/null; then
-                success "Download complete"
-                break
-            fi
-        elif command -v wget >/dev/null 2>&1; then
-            if wget -q --show-progress "$url" -O "$temp_file" 2>/dev/null; then
-                success "Download complete"
-                break
-            fi
+    # Create temp directory
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    
+    info "Downloading from: $download_url"
+    
+    local archive_file="${temp_dir}/${archive_name}"
+    
+    # Download
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsSL --progress-bar "$download_url" -o "$archive_file"; then
+            rm -rf "$temp_dir"
+            die "Failed to download archive. Please check the version and try again."
         fi
-    done
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -q --show-progress "$download_url" -O "$archive_file"; then
+            rm -rf "$temp_dir"
+            die "Failed to download archive. Please check the version and try again."
+        fi
+    else
+        rm -rf "$temp_dir"
+        die "Neither curl nor wget found. Please install one of them."
+    fi
     
-    if [ ! -s "$temp_file" ]; then
-        rm -f "$temp_file"
-        die "Failed to download binary. Please check the version and try again."
+    success "Download complete"
+    
+    # Extract archive
+    info "Extracting archive..."
+    if ! tar -xzf "$archive_file" -C "$temp_dir"; then
+        rm -rf "$temp_dir"
+        die "Failed to extract archive"
+    fi
+    
+    # Find the binary in extracted files
+    local extracted_binary
+    extracted_binary=$(find "$temp_dir" -type f -name "$BINARY" | head -n 1)
+    
+    if [ -z "$extracted_binary" ]; then
+        rm -rf "$temp_dir"
+        die "Binary not found in archive"
     fi
     
     # Install
     local target="${install_dir}/${BINARY}"
-    mv "$temp_file" "$target"
+    mv "$extracted_binary" "$target"
     chmod +x "$target"
+    
+    # Cleanup
+    rm -rf "$temp_dir"
     
     echo "$target"
 }
