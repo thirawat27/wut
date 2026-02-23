@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/truncate"
 	"github.com/spf13/cobra"
-	"golang.design/x/clipboard"
 
 	"wut/internal/config"
 	"wut/internal/db"
@@ -135,11 +135,7 @@ type historyModel struct {
 }
 
 func newHistoryModel(entries []db.CommandExecution, total int) historyModel {
-	err := clipboard.Init()
 	msg := ""
-	if err != nil {
-		msg = "Clipboard init failed (try installing xclip/xsel on Linux)"
-	}
 
 	numPages := int(math.Ceil(float64(len(entries)) / 10.0))
 	if numPages == 0 {
@@ -205,9 +201,13 @@ func (m historyModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter", "c", "y": // c for copy, y for yank, enter for copy
 			if m.cursor >= 0 && m.cursor < len(m.entries) {
 				targetCmd := m.entries[m.cursor].Command
-				clipboard.Write(clipboard.FmtText, []byte(targetCmd))
-				m.msg = "📋 Copied to clipboard"
-				return m, tickClearMsg()
+				if err := clipboard.WriteAll(targetCmd); err == nil {
+					m.msg = "📋 Copied to clipboard"
+					return m, tickClearMsg()
+				} else {
+					m.msg = string("❌ Copy failed: " + err.Error())
+					return m, tickClearMsg()
+				}
 			}
 		}
 	}
@@ -236,19 +236,31 @@ func (m historyModel) View() string {
 
 	s := ""
 	if m.msg != "" {
-		// Expanded padding for alert to look balanced
-		alertStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Background(lipgloss.Color("#064E3B")).Padding(0, 3)
-		alertStr := alertStyle.Render(m.msg)
+		// Premium alert with rounded container and balanced padding
+		alertIcon := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Render("✔️  ")
+		alertText := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Bold(true).Render(m.msg)
+
+		alertStr := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#10B981")).
+			Padding(0, 2).
+			Render(alertIcon + alertText)
+
 		titleWidth := lipgloss.Width(titleStr)
 		alertWidth := lipgloss.Width(alertStr)
 
 		padding := innerWidth - titleWidth - alertWidth
-		if padding > 0 {
-			s = titleStr + strings.Repeat(" ", padding) + alertStr + "\n\n"
-		} else {
-			s = titleStr + " " + alertStr + "\n\n"
+		if padding < 1 {
+			padding = 1
 		}
+
+		// Align vertically center: Title strings are height 1, Alert is height 3
+		titleBox := lipgloss.NewStyle().Height(lipgloss.Height(alertStr)).AlignVertical(lipgloss.Center).Render(titleStr)
+		spaceBox := lipgloss.NewStyle().Width(padding).Render("")
+
+		s = lipgloss.JoinHorizontal(lipgloss.Center, titleBox, spaceBox, alertStr) + "\n\n"
 	} else {
+		// Keep the same visual gap logic but without the alert
 		s = titleStr + "\n\n"
 	}
 
@@ -271,7 +283,7 @@ func (m historyModel) View() string {
 			cmdStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#3B82F6")).Padding(0, 1) // Highlight selected
 		}
 
-		timeStr := entry.Timestamp.Format("01-02 15:04")
+		timeStr := entry.Timestamp.Local().Format("01-02 15:04")
 		dispCmd := entry.Command
 		if lipgloss.Width(dispCmd) > availWidth {
 			dispCmd = truncate.StringWithTail(dispCmd, uint(availWidth), "...")
