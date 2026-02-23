@@ -8,7 +8,7 @@
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.26-blue)](https://golang.org)
-[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux%20%7C%20BSD-blue)]
+[![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20macOS%20%7C%20Linux-blue)]
 [![Release](https://img.shields.io/github/v/release/thirawat27/wut)](https://github.com/thirawat27/wut/releases)
 
 [Features](#key-features) • [Install](#installation) • [Quick Start](#getting-started) • [Commands](#command-reference) • [Docs](#configuration)
@@ -256,6 +256,7 @@ WUT provides convenient shortcuts for faster typing:
 | `wut t` | `wut db` | Database management |
 | `wut f` | `wut fix` | Fix command typos |
 | `wut ?` | `wut smart` | Smart suggestions |
+| `wut b` | `wut bookmark` | Manage bookmarks |
 
 ### 1. Suggest Command
 
@@ -286,8 +287,6 @@ wut suggest git --limit 5
 wut suggest git --exec
 ```
 
-> **Note**: Command execution in `suggest` happens via the TUI interface itself (press Enter on a command). The `--exec` flag is defined but not yet wired to the non-interactive flow.
-
 **Interactive Mode Features:**
 - Type to search through thousands of commands
 - Arrow keys to navigate
@@ -308,12 +307,7 @@ wut fix "rm -rf /"
 
 # List common typos that WUT can fix
 wut fix --list
-
-# Copy corrected command to clipboard
-wut fix "gti push" --copy
 ```
-
-> **Note**: The `--copy` flag is defined but clipboard copying is not yet fully implemented in the current version.
 
 **Common Typos Detected:**
 - `gti` → `git`
@@ -338,8 +332,6 @@ wut explain "docker build -t myapp ." --verbose
 # Check specifically for dangerous commands
 wut explain "rm -rf /" --dangerous
 ```
-
-> **Note**: The `--verbose` flag is defined but additional detail output is not yet differentiated from the standard output in the current version.
 
 **Explanation Includes:**
 - Command summary and description
@@ -372,8 +364,6 @@ wut smart --exec
 wut smart --correct=false
 ```
 
-> **Note**: The `--exec` flag is defined but not yet fully implemented in the current version.
-
 **Context Detection:**
 WUT automatically detects your project type and provides relevant suggestions:
 - **Go projects**: `go mod tidy`, `go test ./...`, `go build`
@@ -400,9 +390,6 @@ wut h --search "git commit"
 # Import commands from shell history
 wut h --import-shell
 
-# Import with custom worker count for faster processing
-wut h --import-shell --workers 4
-
 # Import history from file
 wut h --import history.json
 
@@ -426,14 +413,11 @@ wut a
 wut a --add --name gs --command "git status"
 wut a --add --name dc --command "docker-compose"
 
-# Remove an alias
-# Note: Remove alias is not yet implemented. Edit config file directly.
-
 # Generate smart aliases based on your project
 wut a --generate
 
-# Export aliases to shell format
-# Note: Export aliases to shell format is not yet implemented
+# Apply aliases to shell config
+wut a --apply
 ```
 
 ### 7. Config Command
@@ -514,8 +498,43 @@ wut install --all
 
 # Uninstall shell integration
 wut install --uninstall
+```
 
-# Note: --status flag is not implemented
+### 10. Bookmark Command
+
+Save and organize your favorite commands with labels and notes.
+
+```bash
+# List all bookmarks
+wut bookmark
+wut b
+
+# Add a new bookmark
+wut bookmark add "docker ps" --label docker
+wut b add "git status" -l git -n "Check git status"
+
+# Remove a bookmark
+wut bookmark remove 1
+wut b rm docker
+
+# Search through bookmarks
+wut bookmark search docker
+wut b search git
+```
+
+### 11. Stats Command
+
+View WUT usage statistics and productivity metrics.
+
+```bash
+# View usage statistics
+wut stats
+
+# Shows:
+# - Total command executions
+# - Top commands leaderboard
+# - Time-of-day usage heatmap
+# - Productivity score
 ```
 
 ## Configuration
@@ -815,7 +834,6 @@ wut config --set logging.level --value debug
 - **Bug Reports**: [GitHub Issues](https://github.com/thirawat27/wut/issues)
 - **Feature Requests**: [GitHub Issues](https://github.com/thirawat27/wut/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/thirawat27/wut/discussions)
-- **Documentation**: [GitHub Wiki](https://github.com/thirawat27/wut/wiki)
 
 
 
