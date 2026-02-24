@@ -134,8 +134,11 @@ func runConfig(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	// Default: show configuration wizard
-	return runConfigUI()
+	// Default: show configuration wizard (TUI), fall back to plain text on error
+	if err := runConfigUI(); err != nil {
+		return showConfig()
+	}
+	return nil
 }
 
 func runConfigUI() error {
@@ -811,33 +814,43 @@ func (m configUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		// ตรวจสอบว่าหน้าจอใหญ่พอที่จะแสดง Logo หรือไม่ (Responsive)
+		// ── Responsive: ปรับตามขนาดหน้าจอ ───────────────────────────────────────
 		showLogo := m.height > 24
 
-		// 1. คำนวณความสูงของพื้นที่ตกแต่งอื่นๆ ที่ไม่ใช่ Form (Borders, Padding, Headers, Footer)
-		decorHeight := 10 // พื้นที่ขั้นต่ำที่ต้องหักออก (ไม่มีโลโก้)
+		// 1. คำนวณความสูงพื้นที่ตกแต่ง (Border/Padding/Header/Footer)
+		decorHeight := 9 // ขั้นต่ำ: header(1) + border(2) + padding(2) + footer(2) + margin(2)
 		if showLogo {
-			decorHeight = 18 // รวมความสูงโลโก้และการเว้นบรรทัด
+			decorHeight = 16 // โลโก้ 5 บรรทัด + subtitle 1 + เว้น 2 + ส่วนที่เหลือ
 		}
 
-		// 2. คำนวณพื้นที่ความสูงที่แท้จริงให้ Form เพื่อให้ระบบ Scroll ภายในทำงานได้ถูกต้อง
+		// 2. ความสูงให้ Form (ป้องกันค่าติดลบ)
 		formHeight := m.height - decorHeight
 		if formHeight < 5 {
-			formHeight = 5 // ป้องกันขนาดติดลบในจอที่แคบมากๆ
+			formHeight = 5
 		}
 
-		// 3. คำนวณความกว้าง
+		// 3. คำนวณความกว้าง UI แบบ responsive
+		//    - จอกว้าง ≥ 84: ใช้ 75 col (centered look)
+		//    - จอกว้าง 40-83: ยืดเต็มเกือบหมด
+		//    - จอแคบ < 40: ปรับให้ fit
 		uiWidth := 75
-		if m.width < 80 {
+		if m.width < 84 {
 			uiWidth = m.width - 4
 		}
-		formWidth := uiWidth - 6 // หักลบความกว้างของ Border(2) และ Padding(4) ด้านข้าง
+		if uiWidth < 30 {
+			uiWidth = 30
+		}
 
-		// 4. แจ้งขนาดจริงกับ form
+		// 4. formWidth = uiWidth หัก border(2) + padding(6)
+		formWidth := uiWidth - 8
+		if formWidth < 20 {
+			formWidth = 20
+		}
+
+		// 5. แจ้งขนาดจริงกับ form
 		m.form = m.form.WithHeight(formHeight).WithWidth(formWidth)
 
-		// 5. ส่ง WindowSizeMsg ตัวใหม่ให้ form โดยตรง (ขนาดที่หักส่วนตกแต่งออกไปแล้ว)
-		// วิธีนี้แก้ปัญหาการเลื่อนดูตัวเลือกและตัดขอบล่าง 100%
+		// 6. ส่ง WindowSizeMsg ที่ปรับแล้วให้ form เพื่อให้ scroll ทำงานถูกต้อง
 		adjustedMsg := tea.WindowSizeMsg{
 			Width:  formWidth,
 			Height: formHeight,
@@ -885,16 +898,26 @@ func (m configUI) View() string {
 	accentDark := lipgloss.Color("#7C3AED")
 	dimText := lipgloss.Color("#6B7280")
 
-	// คำนวณความกว้างคงที่ (ถ้าจอเล็กลงก็จะหดตาม)
+	// ── Responsive width ─────────────────────────────────────────────────────
 	uiWidth := 75
-	if w < 80 {
-		uiWidth = w - 4 // Responsive fallback
+	if w < 84 {
+		uiWidth = w - 4
+	}
+	if uiWidth < 30 {
+		uiWidth = 30
+	}
+
+	// ── Responsive left margin ────────────────────────────────────────────────
+	// จอกว้าง ≥ 84 → margin 4, จอแคบลงให้ลด margin ลงตามสัดส่วน
+	marginLeft := 4
+	if w < 84 {
+		marginLeft = 1
 	}
 
 	var headerElements []string
 
-	// ─── ASCII Logo (Responsive: แสดงต่อเมื่อจอสูงกว่า 24 บรรทัด) ────────────
-	if h > 24 {
+	// ─── ASCII Logo (แสดงเมื่อจอสูง > 24 และกว้าง ≥ 36) ────────────────────
+	if h > 24 && w >= 36 {
 		wutLogo := `
  ██╗    ██╗██╗   ██╗████████╗
  ██║    ██║██║   ██║╚══██╔══╝
@@ -906,56 +929,74 @@ func (m configUI) View() string {
 			Foreground(accentDark).
 			Bold(true)
 
-		subtitleStyle := lipgloss.NewStyle().
-			Foreground(dimText).
-			MarginBottom(1).
-			MarginLeft(1)
-
-		logoBlock := lipgloss.JoinVertical(lipgloss.Left,
-			logoStyle.Render(strings.TrimPrefix(wutLogo, "\n")),
-			subtitleStyle.Render("The Smart Command Line Assistant That Actually Understands You"),
-		)
+		// Subtitle ซ่อนถ้าจอแคบเกิน
+		var logoBlock string
+		if w >= 70 {
+			subtitleStyle := lipgloss.NewStyle().
+				Foreground(dimText).
+				MarginBottom(1).
+				MarginLeft(1)
+			logoBlock = lipgloss.JoinVertical(lipgloss.Left,
+				logoStyle.Render(strings.TrimPrefix(wutLogo, "\n")),
+				subtitleStyle.Render("The Smart Command Line Assistant That Actually Understands You"),
+			)
+		} else {
+			logoBlock = logoStyle.Render(strings.TrimPrefix(wutLogo, "\n"))
+		}
 		headerElements = append(headerElements, logoBlock)
 	}
 
 	// ─── Header Tab ───────────────────────────────────────────────────────────
 	titleText := " ⚙  WUT Configuration "
+	if w < 40 {
+		titleText = " ⚙ Config "
+	}
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Background(accentDark).
 		Padding(0, 1)
-
-	// นำ Header ไปต่อท้าย Array เพื่อรอจัดวางแนวตั้ง
 	headerElements = append(headerElements, headerStyle.Render(titleText))
 	headerBlock := lipgloss.JoinVertical(lipgloss.Left, headerElements...)
 
-	// ─── Form body ────────────────────────────────────────────────────────────
-	// ขนาดความกว้างกล่อง
+	// ─── Form box ─────────────────────────────────────────────────────────────
 	boxWidth := uiWidth
-	if boxWidth < 50 {
-		boxWidth = 50
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	boxPadX := 3
+	if w < 60 {
+		boxPadX = 1
 	}
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(accentDark).
-		Padding(1, 3).
+		Padding(1, boxPadX).
 		Width(boxWidth)
 
 	body := boxStyle.Render(m.form.View())
 
 	// ─── Footer ───────────────────────────────────────────────────────────────
-	footerStyle := lipgloss.NewStyle().Foreground(dimText).MarginTop(1).MarginLeft(1)
-	footer := footerStyle.Render("↑/↓ navigate • enter/tab next page • ←/→/space toggle • ctrl+c quit")
+	footerText := "↑/↓ navigate • enter/tab next • ←/→/space toggle • ctrl+c quit"
+	if w < 70 {
+		footerText = "↑/↓ nav • enter next • ←/→ toggle • ctrl+c quit"
+	}
+	if w < 50 {
+		footerText = "↑/↓ • enter • ←/→ • ^c"
+	}
+	footerStyle := lipgloss.NewStyle().Foreground(dimText).MarginTop(1)
+	footer := footerStyle.Render(footerText)
 
-	// ─── Container รวมร่างทั้งหมด ──────────────────────────────────────────────
-	container := lipgloss.NewStyle().
-		MarginLeft(4).
-		MarginTop(1).
-		Render(lipgloss.JoinVertical(lipgloss.Left, headerBlock, body, footer))
+	// ─── Container ────────────────────────────────────────────────────────────
+	containerStyle := lipgloss.NewStyle().
+		MarginLeft(marginLeft).
+		MarginTop(1)
+	container := containerStyle.Render(
+		lipgloss.JoinVertical(lipgloss.Left, headerBlock, body, footer),
+	)
 
-	// จัดวางชิดซ้ายบนเสมอ เพื่อไม่ให้มีปัญหา Layout เด้งหรือตัดขอบ
 	return lipgloss.Place(w, h, lipgloss.Left, lipgloss.Top, container)
 }
 

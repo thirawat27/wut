@@ -13,6 +13,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var statsCmd = &cobra.Command{
@@ -40,7 +41,6 @@ var (
 	sColYellow = lipgloss.Color("#FCD34D")
 	sColGray   = lipgloss.Color("#6B7280")
 	sColLtGray = lipgloss.Color("#D1D5DB")
-	sColBg     = lipgloss.Color("#1E1B4B") // deep indigo bg hint (border only)
 )
 
 func runStats(cmd *cobra.Command, args []string) error {
@@ -160,8 +160,37 @@ func runStats(cmd *cobra.Command, args []string) error {
 			),
 		)
 
-	fmt.Println(lipgloss.JoinHorizontal(lipgloss.Top, card1, "  ", card2, "  ", card3))
+	// ─── Get dynamic terminal width ──────────────────────────────────────────
+	termWidth := 86
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		termWidth = w
+	}
+
+	if termWidth < 75 {
+		// Stack cards vertically
+		fmt.Println(lipgloss.JoinVertical(lipgloss.Left, card1, card2, card3))
+	} else {
+		// Side-by-side
+		fmt.Println(lipgloss.JoinHorizontal(lipgloss.Top, card1, "  ", card2, "  ", card3))
+	}
 	fmt.Println()
+
+	// คำนวณความกว้างสูงสุดของบาร์กราฟ ลดหลั่นตามขนาดจอ
+	maxBarWidth := 36
+	if termWidth < 86 {
+		maxBarWidth = termWidth - 50 // หักลบส่วน label, border, padding
+	}
+	if maxBarWidth < 5 {
+		maxBarWidth = 5
+	}
+
+	boxLayoutWidth := 86
+	if termWidth < 90 {
+		boxLayoutWidth = termWidth - 4
+	}
+	if boxLayoutWidth < 40 {
+		boxLayoutWidth = 40
+	}
 
 	// ─── Top Commands Leaderboard ─────────────────────────────────────────────
 	displayCount := 7
@@ -186,16 +215,16 @@ func runStats(cmd *cobra.Command, args []string) error {
 		c := stats.TopCommands[i]
 		barWidth := 0
 		if maxCount > 0 {
-			barWidth = int(math.Round(float64(c.Count) / float64(maxCount) * 36.0))
+			barWidth = int(math.Round(float64(c.Count) / float64(maxCount) * float64(maxBarWidth)))
 		}
-		if barWidth == 0 {
+		if barWidth == 0 && c.Count > 0 {
 			barWidth = 1
 		}
-		if barWidth > 36 {
-			barWidth = 36
+		if barWidth > maxBarWidth {
+			barWidth = maxBarWidth
 		}
 
-		barStr := strings.Repeat("█", barWidth) + strings.Repeat(" ", 36-barWidth)
+		barStr := strings.Repeat("█", barWidth) + strings.Repeat(" ", maxBarWidth-barWidth)
 		barCol := lipgloss.NewStyle().Foreground(barColors[i%len(barColors)]).Render(barStr)
 		pct := float64(c.Count) / float64(stats.TotalExecutions) * 100
 
@@ -217,7 +246,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 		lbLines = append(lbLines, line)
 	}
 
-	lbBox := panelBorder.Width(86).Render(strings.Join(lbLines, "\n"))
+	lbBox := panelBorder.Width(boxLayoutWidth).Render(strings.Join(lbLines, "\n"))
 	fmt.Println(lbBox)
 	fmt.Println()
 
@@ -246,16 +275,16 @@ func runStats(cmd *cobra.Command, args []string) error {
 		v := stats.TimeDistribution[k]
 		w := 0
 		if timeMax > 0 {
-			w = int(math.Round(float64(v) / float64(timeMax) * 32.0))
+			w = int(math.Round(float64(v) / float64(timeMax) * float64(maxBarWidth)))
 		}
 		if w == 0 && v > 0 {
 			w = 1
 		}
-		if w > 32 {
-			w = 32
+		if w > maxBarWidth {
+			w = maxBarWidth
 		}
 		filled := strings.Repeat("▇", w)
-		empty := strings.Repeat("·", 32-w)
+		empty := strings.Repeat("·", maxBarWidth-w)
 		barCol := lipgloss.NewStyle().Foreground(timeColors[i]).Render(filled) +
 			lipgloss.NewStyle().Foreground(sColGray).Render(empty)
 
@@ -274,7 +303,7 @@ func runStats(cmd *cobra.Command, args []string) error {
 		hmLines = append(hmLines, line)
 	}
 
-	hmBox := panelBorder.Width(86).Render(strings.Join(hmLines, "\n"))
+	hmBox := panelBorder.Width(boxLayoutWidth).Render(strings.Join(hmLines, "\n"))
 	fmt.Println(hmBox)
 
 	// ─── Footer ───────────────────────────────────────────────────────────────

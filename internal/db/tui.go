@@ -203,9 +203,38 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.list.SetSize(msg.Width, msg.Height-8)
-		m.viewport.Width = msg.Width - 4
-		m.viewport.Height = msg.Height - 10
+
+		// ── Responsive width calculations ─────────────────────────────────────
+		w := msg.Width
+		h := msg.Height
+
+		// Input width
+		inputW := w - 4
+		if inputW > 50 {
+			inputW = 50
+		} else if inputW < 10 {
+			inputW = 10
+		}
+		m.input.Width = inputW
+
+		// List size
+		listH := h - 8
+		if listH < 5 {
+			listH = 5
+		}
+		m.list.SetSize(w, listH)
+
+		// Viewport size
+		vpW := w - 4
+		if vpW < 10 {
+			vpW = 10
+		}
+		vpH := h - 10
+		if vpH < 5 {
+			vpH = 5
+		}
+		m.viewport.Width = vpW
+		m.viewport.Height = vpH
 
 	case tea.KeyMsg:
 		// Global keys
@@ -412,11 +441,23 @@ func (m *Model) searchView() string {
 	b.WriteString(m.list.View())
 
 	// Help
-	help := helpStyle.Render("enter: view • /: search • esc/q: quit")
+	helpText := "enter: view • /: search • esc/q: quit"
+	if m.width < 50 {
+		helpText = "enter/view • /search • q: quit"
+	}
+	help := helpStyle.Render(helpText)
 	b.WriteString("\n")
 	b.WriteString(help)
 
-	return b.String()
+	// Container box for search view to keep it clean and bounded
+	boxW := m.width - 2
+	if boxW < 20 {
+		boxW = 20
+	}
+
+	// Create a wrapper with padding to prevent overflow
+	wrapper := lipgloss.NewStyle().Width(boxW).Render(b.String())
+	return wrapper
 }
 
 // detailView renders the detail mode
@@ -488,11 +529,25 @@ func (m *Model) detailView() string {
 	}
 
 	// Footer
-	footer := helpStyle.Render("↑/↓: select • 1-9: jump • c: copy • e: execute • esc: back")
+	footerText := "↑/↓: select • 1-9: jump • c: copy • e: execute • esc: back"
+	if m.width < 70 {
+		footerText = "↑/↓: sel • c: copy • e: exec • esc: back"
+	}
+	if m.width < 45 {
+		footerText = "↑/↓ • c: cop • e: exe • esc"
+	}
+
+	footer := helpStyle.Render(footerText)
 	b.WriteString("\n")
 	b.WriteString(footer)
 
-	return boxStyle.Render(b.String())
+	boxW := m.width - 2
+	if boxW < 20 {
+		boxW = 20
+	}
+
+	activeBoxStyle := boxStyle.Width(boxW)
+	return activeBoxStyle.Render(b.String())
 }
 
 // renderPage renders a page for viewport
@@ -532,7 +587,12 @@ func (m *Model) renderPage(page *Page) string {
 		}
 	}
 
-	return b.String()
+	// Wrap content to fit viewport width and prevent horizontal overflow
+	contentWidth := m.viewport.Width - 2
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	return lipgloss.NewStyle().Width(contentWidth).Render(b.String())
 }
 
 // Selected returns the selected command

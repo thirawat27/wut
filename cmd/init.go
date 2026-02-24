@@ -12,6 +12,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"wut/internal/config"
 	"wut/internal/logger"
@@ -114,6 +115,20 @@ func runInit(cmd *cobra.Command, args []string) error {
 		os.Exit(1)
 	}()
 
+	// ─── Get dynamic terminal width ──────────────────────────────────────────
+	termWidth := 80
+	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+		termWidth = w
+	}
+
+	heroWidth := 54
+	if termWidth < 60 {
+		heroWidth = termWidth - 4
+	}
+	if heroWidth < 30 {
+		heroWidth = 30
+	}
+
 	// ─── Hero Banner ───────────────────────────────────────────────────────────
 	if !initQuick {
 		panelBorder := lipgloss.NewStyle().
@@ -137,7 +152,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 		heroContent := lipgloss.JoinVertical(lipgloss.Left, heroLogo, "", heroDesc)
 		fmt.Println()
-		fmt.Println(panelBorder.Width(54).Render(heroContent))
+		fmt.Println(panelBorder.Width(heroWidth).Render(heroContent))
 	}
 
 	totalSteps := 4
@@ -151,10 +166,19 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	printStep := func(icon, title string) {
 		stepNum++
+
+		separatorLen := 50
+		if termWidth < 60 {
+			separatorLen = termWidth - 8
+		}
+		if separatorLen < 20 {
+			separatorLen = 20
+		}
+
 		badge := lipgloss.NewStyle().Bold(true).Foreground(cBlue).Render(fmt.Sprintf("[%d/%d]", stepNum, totalSteps))
 		heading := lipgloss.NewStyle().Bold(true).Foreground(cWhite).Render(icon + "  " + title)
 		fmt.Printf("\n  %s  %s\n", badge, heading)
-		fmt.Println(lipgloss.NewStyle().Foreground(cDarkGray).Render("  " + strings.Repeat("━", 50)))
+		fmt.Println(lipgloss.NewStyle().Foreground(cDarkGray).Render("  " + strings.Repeat("━", separatorLen)))
 	}
 	printOK := func(s string) {
 		fmt.Printf("    %s  %s\n", lipgloss.NewStyle().Foreground(cGreen).Render("✓"), lipgloss.NewStyle().Foreground(cGray).Render(s))

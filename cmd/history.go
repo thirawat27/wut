@@ -225,8 +225,26 @@ func (m historyModel) View() string {
 		end = len(m.entries)
 	}
 
-	// Calculate working width inside the border box
-	innerWidth := m.width - 6 // Border width (2) + Padding width (4)
+	// ── Responsive widths ───────────────────────────────────────────────────
+	w := m.width
+	if w <= 0 {
+		w = 80 // ค่าเริ่มต้นก่อนได้ WindowSizeMsg
+	}
+
+	// box padding ปรับตามความกว้างจอ
+	boxPadX := 2
+	if w < 60 {
+		boxPadX = 1
+	}
+
+	// boxWidth = เต็มจอ ลบ 2 สำหรับขอบ border ทั้งสองข้าง
+	boxWidth := w - 2
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	// innerWidth = พื้นที่ใช้งานจริงภายในกล่อง
+	innerWidth := boxWidth - 2 - (boxPadX * 2)
 	if innerWidth < 20 {
 		innerWidth = 20
 	}
@@ -236,7 +254,6 @@ func (m historyModel) View() string {
 
 	s := ""
 	if m.msg != "" {
-		// Premium alert with rounded container and balanced padding
 		alertIcon := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Render("✔️  ")
 		alertText := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Bold(true).Render(m.msg)
 
@@ -254,21 +271,29 @@ func (m historyModel) View() string {
 			padding = 1
 		}
 
-		// Align vertically center: Title strings are height 1, Alert is height 3
 		titleBox := lipgloss.NewStyle().Height(lipgloss.Height(alertStr)).AlignVertical(lipgloss.Center).Render(titleStr)
 		spaceBox := lipgloss.NewStyle().Width(padding).Render("")
 
 		s = lipgloss.JoinHorizontal(lipgloss.Center, titleBox, spaceBox, alertStr) + "\n\n"
 	} else {
-		// Keep the same visual gap logic but without the alert
 		s = titleStr + "\n\n"
 	}
 
 	indexStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Width(4).Align(lipgloss.Right)
 	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
 
-	// Calculation for truncated command length
-	availWidth := innerWidth - 27 // Account for index (4), time (15), cursor (2), and paddings
+	// ซ่อน timestamp บนจอแคบ (< 50 col)
+	showTime := w >= 50
+
+	// availWidth: พื้นที่สำหรับ command text
+	// index(4) + space(1) + time+brackets(13) + spaces(3) + cursor(2) = 23 เมื่อมี time
+	// index(4) + space(1) + cursor(2) = 7 เมื่อไม่มี time
+	var availWidth int
+	if showTime {
+		availWidth = innerWidth - 23
+	} else {
+		availWidth = innerWidth - 7
+	}
 	if availWidth < 10 {
 		availWidth = 10
 	}
@@ -280,31 +305,45 @@ func (m historyModel) View() string {
 
 		if m.cursor == i {
 			cursor = "👉"
-			cmdStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#3B82F6")).Padding(0, 1) // Highlight selected
+			cmdStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#FFFFFF")).Background(lipgloss.Color("#3B82F6")).Padding(0, 1)
 		}
 
-		timeStr := entry.Timestamp.Local().Format("01-02 15:04")
 		dispCmd := entry.Command
 		if lipgloss.Width(dispCmd) > availWidth {
 			dispCmd = truncate.StringWithTail(dispCmd, uint(availWidth), "...")
 		}
 
-		s += fmt.Sprintf("%s %s %s   %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), metaStyle.Render("["+timeStr+"]"), cmdStyle.Render(dispCmd))
+		if showTime {
+			timeStr := entry.Timestamp.Local().Format("01-02 15:04")
+			s += fmt.Sprintf("%s %s %s   %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), metaStyle.Render("["+timeStr+"]"), cmdStyle.Render(dispCmd))
+		} else {
+			s += fmt.Sprintf("%s %s %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), cmdStyle.Render(dispCmd))
+		}
 	}
 
 	s += lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
 		fmt.Sprintf("Showing %d unique executions out of %d total recorded.", len(m.entries), m.total))
 	s += "\n\n"
 
+	// ── Footer text (responsive) ──────────────────────────────────────────────
 	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
 	s += footerStyle.Render(fmt.Sprintf("Page %d/%d", m.page+1, m.numPages))
-	s += lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(" | [↑/↓] Navigate | [←/→] Prev/Next Page | [c/enter] Copy | [q] Quit\n")
+
+	var footerNav string
+	if w >= 90 {
+		footerNav = " | [↑/↓] Navigate | [←/→] Prev/Next Page | [c/enter] Copy | [q] Quit"
+	} else if w >= 60 {
+		footerNav = " | ↑/↓ nav | ←/→ page | c copy | q quit"
+	} else {
+		footerNav = " | ↑/↓ | ←/→ | c | q"
+	}
+	s += lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(footerNav + "\n")
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("#7C3AED")).
-		Padding(1, 2).
-		Width(m.width - 2)
+		Padding(1, boxPadX).
+		Width(boxWidth)
 
 	return boxStyle.Render(strings.TrimRight(s, "\n"))
 }

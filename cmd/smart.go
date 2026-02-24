@@ -77,6 +77,19 @@ func runSmart(cmd *cobra.Command, args []string) error {
 	// Check for typos if enabled
 	if smartCorrect && query != "" {
 		c := corrector.New()
+
+		// Optional: supply history to corrector for better matching
+		if s, err := db.NewStorage(config.Get().Database.Path); err == nil {
+			if history, err := s.GetHistory(context.Background(), 100); err == nil {
+				var historyCmds []string
+				for _, h := range history {
+					historyCmds = append(historyCmds, h.Command)
+				}
+				c.SetHistoryCommands(historyCmds)
+			}
+			s.Close()
+		}
+
 		if correction, err := c.Correct(query); err == nil && correction != nil {
 			printCorrection(correction)
 			if correction.IsDangerous {

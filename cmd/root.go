@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"golang.org/x/term"
 )
 
 var (
@@ -94,14 +95,28 @@ func init() {
 func setupPremiumHelp(cmd *cobra.Command) {
 	cmd.SetHelpFunc(func(c *cobra.Command, args []string) {
 		if c.Name() == "wut" {
+			termWidth := 80
+			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+				termWidth = w
+			}
+
+			padX := 4
+			if termWidth < 70 {
+				padX = 1
+			}
+
 			bannerStyle := lipgloss.NewStyle().
 				Bold(true).
 				Foreground(lipgloss.Color("#FFFFFF")).
 				Background(lipgloss.Color("#8B5CF6")). // Electric Blue background
-				Padding(1, 4).                         // Top/bottom 1, left/right 4
+				Padding(1, padX).                      // Dynamic left/right padding
 				Border(lipgloss.NormalBorder()).
 				BorderForeground(lipgloss.Color("#8B5CF6")). // Violet border
 				MarginBottom(1)
+
+			if termWidth < 70 {
+				bannerStyle = bannerStyle.Width(termWidth - 2)
+			}
 
 			desc := "⚡ WUT (What ?)\nThe Smart Command Line Assistant That Actually Understands You"
 			fmt.Printf("\n%s\n", bannerStyle.Render(desc))

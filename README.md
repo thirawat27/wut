@@ -32,7 +32,8 @@
 ## Key Features
 
 - **Smart Command Suggestions**: Context-aware command recommendations based on your project type and history
-- **Typo Correction**: Automatically detect and fix common command typos
+- **Typo Correction**: Detect and fix typos across the **entire command sentence** (not just the first word)
+- **Undo Assistant**: Instantly suggests how to revert your last command with `wut undo`
 - **Command Explanations**: Get detailed breakdowns of what commands do and their potential risks
 - **Command Database**: Quick access to practical command examples from the command database
 - **History Tracking**: Learn from your command usage patterns
@@ -257,6 +258,7 @@ WUT provides convenient shortcuts for faster typing:
 | `wut f` | `wut fix` | Fix command typos |
 | `wut ?` | `wut smart` | Smart suggestions |
 | `wut b` | `wut bookmark` | Manage bookmarks |
+| `wut undo` | `wut undo` | Revert your last command |
 
 ### 1. Suggest Command
 
@@ -295,12 +297,18 @@ wut suggest git --exec
 
 ### 2. Fix Command
 
-Automatically detect and correct typos in commands.
+Automatically detect and correct typos in commands. WUT analyzes the **entire command sentence**, not just the first word, finding and fixing all misspelled tokens in a single pass.
 
 ```bash
-# Fix a typo
-wut fix "gti status"
+# Fix a typo in any part of the command
+wut fix "gti comit -m 'update'"
+# → git commit -m 'update'
+
+wut fix "docker buld ."
+# → docker build .
+
 wut f "doker ps"
+wut f "kubectl depoly -f app.yaml"
 
 # Check for dangerous commands
 wut fix "rm -rf /"
@@ -309,13 +317,21 @@ wut fix "rm -rf /"
 wut fix --list
 ```
 
+**How It Works:**
+WUT tokenizes the full command and runs each token through:
+1. Exact dictionary lookup (highest confidence)
+2. Levenshtein distance ≤ 2 fuzzy matching across all tokens
+3. History-based full-sentence comparison
+4. Confusable pattern detection (missing `git` prefix, etc.)
+
 **Common Typos Detected:**
-- `gti` → `git`
-- `doker` → `docker`
+- `gti comit` → `git commit` (multi-token fix)
+- `docker buld` → `docker build`
+- `kubectl depoly` → `kubectl deploy`
 - `cd..` → `cd ..`
 - `grpe` → `grep`
-- `npn` → `npm`
-- And many more...
+- `npn isntall` → `npm install`
+- And many more across git, docker, kubectl, terraform...
 
 ### 3. Explain Command
 
@@ -536,6 +552,38 @@ wut stats
 # - Time-of-day usage heatmap
 # - Productivity score
 ```
+
+### 12. Undo Command
+
+Accidentally ran a command? `wut undo` looks at your recent history (or an explicit command you provide) and tells you exactly how to revert it.
+
+```bash
+# Auto-detect last command and suggest how to undo it
+wut undo
+
+# Explicitly provide the command to undo
+wut undo "git add ."
+wut undo "git commit"
+wut undo "tar -xf archive.tar"
+wut undo "systemctl start nginx"
+wut undo "mkdir my-folder"
+```
+
+**Supported Undo Patterns:**
+
+| Command | Undo Suggestion |
+|---------|----------------|
+| `git add .` | `git restore --staged .` |
+| `git commit` | `git reset --soft HEAD~1` |
+| `git push` | `git revert HEAD` |
+| `git merge` | `git merge --abort` |
+| `git rebase` | `git rebase --abort` |
+| `tar -xf file.tar` | `tar -tf file.tar \| xargs rm -rf` |
+| `mkdir dir` | `rmdir dir` |
+| `touch file` | `rm file` |
+| `systemctl start svc` | `sudo systemctl stop svc` |
+| `npm install pkg` | `npm uninstall pkg` |
+| `docker run ...` | `docker stop && docker rm` |
 
 ## Configuration
 

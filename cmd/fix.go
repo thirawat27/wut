@@ -1,15 +1,18 @@
-// Package cmd provides command correction
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 
+	"wut/internal/config"
 	"wut/internal/corrector"
+	"wut/internal/db"
 	"wut/internal/ui"
 )
 
@@ -38,19 +41,59 @@ func init() {
 }
 
 func runFix(cmd *cobra.Command, args []string) error {
-	// List common typos
+	// 1. Setup storage and corrector
+	cfg := config.Get()
+	dbPath := cfg.Database.Path
+	if dbPath == "" {
+		home, _ := os.UserHomeDir()
+		dbPath = home + "/.config/wut/wut.db"
+	}
+
+	store, err := db.NewStorage(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to open database: %w", err)
+	}
+	defer store.Close()
+
+	c := corrector.New()
+
+	// Populate corrector with history for better fuzzy matching
+	if history, err := store.GetHistory(context.Background(), 100); err == nil {
+		var historyCmds []string
+		for _, h := range history {
+			historyCmds = append(historyCmds, h.Command)
+		}
+		c.SetHistoryCommands(historyCmds)
+	}
+
+	// 2. Handle --list flag
 	if fixList {
 		return listCommonTypos()
 	}
 
-	if len(args) == 0 {
-		return fmt.Errorf("please provide a command to fix")
+	// 3. Get input: either from args or last history command
+	input := ""
+	if len(args) > 0 {
+		input = strings.Join(args, " ")
+	} else {
+		// Fetch last command from history (skipping 'wut' commands)
+		history, err := store.GetHistory(context.Background(), 10)
+		if err == nil {
+			for _, entry := range history {
+				cmdStr := strings.TrimSpace(entry.Command)
+				if cmdStr != "" && !strings.HasPrefix(cmdStr, "wut") {
+					input = cmdStr
+					break
+				}
+			}
+		}
 	}
 
-	input := strings.Join(args, " ")
+	if input == "" {
+		return fmt.Errorf("no command provided and no recent history found to fix")
+	}
 
-	// Check for typos
-	c := corrector.New()
+	// 4. Perform correction
 	correction, err := c.Correct(input)
 	if err != nil {
 		return err
@@ -158,19 +201,19 @@ func displayCorrection(c *corrector.Correction) {
 }
 
 func listCommonTypos() error {
-	typos := map[string]string{
-		"gti":   "git",
-		"gi":    "git",
-		"sl":    "ls",
-		"cd..":  "cd ..",
-		"grpe":  "grep",
-		"docer": "docker",
-		"doker": "docker",
-		"npn":   "npm",
-		"pthon": "python",
-		"gut":   "git",
-		"mkr":   "mkdir",
-		"gr":    "grep",
+	// Use a slice of examples since the new corrector uses a dynamic corpus
+	examples := []struct {
+		Typo    string
+		Correct string
+	}{
+		{"gti comit", "git commit"},
+		{"dockr buld", "docker build"},
+		{"kubctl dpoly", "kubectl deploy"},
+		{"terrform applay", "terraform apply"},
+		{"npn isntall", "npm install"},
+		{"systemtcl strat", "systemctl start"},
+		{"cd..", "cd .."},
+		{"grpe", "grep"},
 	}
 
 	headerStyle := lipgloss.NewStyle().
@@ -178,27 +221,13 @@ func listCommonTypos() error {
 		Foreground(lipgloss.Color("#7C3AED"))
 
 	fmt.Println()
-	fmt.Println(headerStyle.Render("📋 Common Typos"))
+	fmt.Println(headerStyle.Render("📋 Core Typo Correction Patterns"))
 	fmt.Println()
 
-	// Sort by key
-	var keys []string
-	for k := range typos {
-		keys = append(keys, k)
-	}
-	for i := 0; i < len(keys)-1; i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if keys[i] > keys[j] {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-
-	for _, typo := range keys {
-		correction := typos[typo]
+	for _, ex := range examples {
 		fmt.Printf("  %s → %s\n",
-			ui.Red(typo),
-			ui.Green(correction))
+			ui.Red(ex.Typo),
+			ui.Green(ex.Correct))
 	}
 
 	fmt.Println()
