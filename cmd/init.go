@@ -334,6 +334,8 @@ func runInit(cmd *cobra.Command, args []string) error {
 			Render(lipgloss.JoinVertical(lipgloss.Left,
 				lipgloss.NewStyle().Foreground(cGreen).Bold(true).Render("🎉 Setup Complete!"),
 				"",
+				ui.Mascot(),
+				"",
 				lipgloss.NewStyle().Foreground(cWhite).Render("Pro tips to get started:"),
 				fmt.Sprintf("  %s        %s", cmdCol("wut s <cmd>"), descCol("Search instant AI cheat sheets")),
 				fmt.Sprintf("  %s               %s", cmdCol("wut h"), descCol("Interactive timeline history")),

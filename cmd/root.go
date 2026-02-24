@@ -120,6 +120,7 @@ func setupPremiumHelp(cmd *cobra.Command) {
 
 			desc := "⚡ WUT (What ?)\nThe Smart Command Line Assistant That Actually Understands You"
 			fmt.Printf("\n%s\n", bannerStyle.Render(desc))
+			fmt.Println(ui.Mascot())
 		} else {
 			fmt.Printf("\n%s\n", ui.Title(fmt.Sprintf("%s - %s", c.CommandPath(), c.Short)))
 			if c.Long != "" && c.Long != c.Short {

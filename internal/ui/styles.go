@@ -78,3 +78,13 @@ func Redf(format string, a ...any) string     { return Errorf(format, a...) }
 func Yellowf(format string, a ...any) string  { return Warningf(format, a...) }
 func Cyanf(format string, a ...any) string    { return Accentf(format, a...) }
 func HiBlackf(format string, a ...any) string { return Mutedf(format, a...) }
+
+// CatMascot ASCII Art for cuteness
+const CatMascot = `      /\_/\
+     ( o.o )
+      > ^ <
+     /|   |\
+    (_|   |_)`
+
+// Mascot returns the styled cat mascot
+func Mascot() string { return StyleSecondary.Render(CatMascot) }

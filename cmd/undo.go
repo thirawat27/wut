@@ -227,6 +227,7 @@ func runUndo(cmd *cobra.Command, args []string) error {
 	// No rule matched
 	fmt.Println(ui.Muted("🤷 I do not have a specific undo rule for this command."))
 	fmt.Println(ui.Muted("Tip: Depending on the program, check its man page or undo feature."))
+	fmt.Println("\n" + ui.Mascot())
 	fmt.Println()
 
 	return nil
