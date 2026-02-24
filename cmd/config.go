@@ -160,176 +160,225 @@ func runConfigUI() error {
 	)
 
 	form := huh.NewForm(
+		// ── 1. Appearance ─────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("UI Theme").
+				Title("Theme").
+				Description("Color scheme for the interface").
 				Options(
-					huh.NewOption("Auto", "auto"),
+					huh.NewOption("Auto (follow system)", "auto"),
 					huh.NewOption("Light", "light"),
 					huh.NewOption("Dark", "dark"),
 				).
 				Value(&cfg.UI.Theme),
 			huh.NewConfirm().
-				Title("Show Confidence").
-				Description("Display the AI's confidence level for responses").
+				Title("Syntax Highlighting").
+				Description("Colorize code snippets and commands").
+				Affirmative("  Yes  ").Negative("  No  ").
+				WithButtonAlignment(lipgloss.Left).
+				Value(&cfg.UI.SyntaxHighlighting),
+			huh.NewInput().
+				Title("Pagination").
+				Description("Number of results per page").
+				Value(&uiPagination),
+		).Title("  Appearance"),
+
+		// ── 2. Display ────────────────────────────────────────────
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Show Confidence Score").
+				Description("Display the AI confidence level alongside results").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.UI.ShowConfidence),
 			huh.NewConfirm().
 				Title("Show Explanations").
-				Description("Display detailed explanations for commands").
+				Description("Include detailed breakdowns for each command").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.UI.ShowExplanations),
-			huh.NewConfirm().
-				Title("Syntax Highlighting").
-				WithButtonAlignment(lipgloss.Left).
-				Value(&cfg.UI.SyntaxHighlighting),
-			huh.NewInput().
-				Title("Pagination Size").
-				Value(&uiPagination),
-		).Title("User Interface"),
+		).Title("  Display"),
 
+		// ── 3. Fuzzy Matching ─────────────────────────────────────
 		huh.NewGroup(
 			huh.NewConfirm().
-				Title("Enable Fuzzy Matching").
-				Description("Enable typo correction and fuzzy searching").
+				Title("Enable Fuzzy Search").
+				Description("Correct typos and find approximate matches").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Fuzzy.Enabled),
 			huh.NewConfirm().
 				Title("Case Sensitive").
+				Description("Distinguish between upper and lower case").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Fuzzy.CaseSensitive),
 			huh.NewInput().
-				Title("Max Distance").
-				Description("Maximum Levenshtein distance for fuzzy matching").
+				Title("Max Edit Distance").
+				Description("Maximum Levenshtein distance (1–5 recommended)").
 				Value(&fuzzyDistance),
 			huh.NewInput().
-				Title("Threshold (0.0 to 1.0)").
-				Description("Confidence threshold for matching").
+				Title("Match Threshold").
+				Description("Minimum similarity score, 0.0 to 1.0").
 				Value(&fuzzyThreshold),
-		).Title("Fuzzy Matching"),
+		).Title("  Fuzzy Matching"),
 
+		// ── 4. TLDR Pages ─────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewConfirm().
-				Title("TLDR Pages Enabled").
+				Title("Enable TLDR Pages").
+				Description("Show community-maintained command cheatsheets").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.TLDR.Enabled),
 			huh.NewConfirm().
 				Title("Offline Mode").
-				Description("Never attempt to fetch pages online").
+				Description("Only use locally cached pages, never fetch online").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.TLDR.OfflineMode),
 			huh.NewConfirm().
-				Title("Auto Sync TLDR Pages").
+				Title("Auto Sync").
+				Description("Periodically download new and updated pages").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.TLDR.AutoSync),
 			huh.NewInput().
-				Title("Sync Interval (days)").
+				Title("Sync Interval").
+				Description("Days between automatic syncs").
 				Value(&tldrSyncInterval),
-		).Title("TLDR Pages"),
+		).Title("  TLDR Pages"),
 
+		// ── 5. Context Analysis ───────────────────────────────────
 		huh.NewGroup(
 			huh.NewConfirm().
-				Title("Enable Context Analysis").
-				Description("Analyze working directory for better suggestions").
+				Title("Enable Context").
+				Description("Analyze your working directory for smarter suggestions").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.Enabled),
 			huh.NewConfirm().
 				Title("Git Integration").
-				Description("Use Git status and history for context").
+				Description("Use repository status and history as context").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.GitIntegration),
 			huh.NewConfirm().
 				Title("Project Detection").
-				Description("Detect project type (Node, Go, Python, etc.)").
+				Description("Auto-detect project type (Node.js, Go, Python, …)").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.ProjectDetection),
 			huh.NewConfirm().
-				Title("Environment Vars").
+				Title("Environment Variables").
+				Description("Include relevant env vars in analysis").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.EnvironmentVars),
-		).Title("Context Analysis"),
+		).Title("  Context Analysis"),
 
+		// ── 6. Database ───────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Database Type").
+				Title("Engine").
+				Description("Storage backend for local data").
 				Options(
-					huh.NewOption("bbolt", "bbolt"),
-					huh.NewOption("sqlite", "sqlite"),
+					huh.NewOption("BBolt (default)", "bbolt"),
+					huh.NewOption("SQLite", "sqlite"),
 				).
 				Value(&cfg.Database.Type),
 			huh.NewInput().
 				Title("Max Size (MB)").
+				Description("Maximum database file size").
 				Value(&dbSize),
 			huh.NewConfirm().
-				Title("Backup Enabled").
+				Title("Automatic Backups").
+				Description("Periodically back up the database").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Database.BackupEnabled),
-		).Title("Database Settings"),
+		).Title("  Database"),
 
+		// ── 7. History ────────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Track History").
+				Description("Remember previously looked-up commands").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.History.Enabled),
 			huh.NewInput().
 				Title("Max Entries").
+				Description("Maximum number of history records to keep").
 				Value(&historyMaxEntries),
 			huh.NewConfirm().
 				Title("Track Frequency").
+				Description("Record how often each command is used").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.History.TrackFrequency),
-		).Title("History Settings"),
+		).Title("  History"),
 
+		// ── 8. Privacy ────────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Local Only").
-				Description("Never send data to external APIs").
+				Description("Never send any data to external services").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Privacy.LocalOnly),
 			huh.NewConfirm().
-				Title("Encrypt Local Data").
+				Title("Encrypt Data").
+				Description("Encrypt locally stored data at rest").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Privacy.EncryptData),
 			huh.NewConfirm().
 				Title("Anonymize Commands").
-				Description("Remove sensitive data from command history").
+				Description("Strip sensitive arguments from history").
+				Affirmative("  Yes  ").Negative("  No  ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Privacy.AnonymizeCommands),
-		).Title("Privacy Settings"),
+		).Title("  Privacy"),
 
+		// ── 9. Logging ────────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Log Level").
+				Description("Minimum severity of messages to record").
 				Options(
-					huh.NewOption("debug", "debug"),
-					huh.NewOption("info", "info"),
-					huh.NewOption("warn", "warn"),
-					huh.NewOption("error", "error"),
+					huh.NewOption("Debug", "debug"),
+					huh.NewOption("Info", "info"),
+					huh.NewOption("Warn", "warn"),
+					huh.NewOption("Error", "error"),
 				).
 				Value(&cfg.Logging.Level),
 			huh.NewInput().
-				Title("Max Size (MB)").
+				Title("Max Log Size (MB)").
+				Description("Rotate log file after this size").
 				Value(&logMaxSize),
 			huh.NewInput().
-				Title("Max Age (days)").
+				Title("Max Log Age (days)").
+				Description("Delete old log files after this many days").
 				Value(&logMaxAge),
-		).Title("Logging Settings"),
+		).Title("  Logging"),
 
+		// ── 10. Confirm ───────────────────────────────────────────
 		huh.NewGroup(
 			huh.NewConfirm().
-				Title("Save Configuration?").
-				Description("Select Yes to save, or No to discard changes").
-				Affirmative("✅ Save").
-				Negative("❌ Cancel").
+				Title("Save all changes?").
+				Affirmative("   Save   ").
+				Negative("   Discard   ").
 				WithButtonAlignment(lipgloss.Left).
 				Value(&confirmSave),
-		).Title("Save"),
+		).Title("  Confirm"),
 	).
-		WithTheme(getPremiumConfigTheme()).
-		WithKeyMap(km)
+		WithTheme(getConfigTheme()).
+		WithKeyMap(km).
+		WithShowHelp(false) // ปิด Help ตัวเก่า เพื่อให้ขนาด UI ชัวร์และไม่บัคซ้อนกัน
 
-	// Wrap in a custom Bubble Tea model to apply a global border
-	p := tea.NewProgram(configUIWrapper{form: form}, tea.WithAltScreen())
+	// Wrap in a custom Bubble Tea model for a polished full-screen layout
+	p := tea.NewProgram(newConfigUI(form), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		return err
 	}
@@ -340,11 +389,11 @@ func runConfigUI() error {
 	}
 
 	if !confirmSave {
-		fmt.Println("\n❌ Configuration cancelled — no changes saved")
+		fmt.Println("\n❌ No changes saved")
 		return nil
 	}
 
-	// Parsing strings back to numerical values
+	// Parse strings back to numerical values
 	if v, err := strconv.Atoi(fuzzyDistance); err == nil {
 		cfg.Fuzzy.MaxDistance = v
 	}
@@ -740,15 +789,74 @@ func getConfigFile() string {
 	return config.GetConfigPath()
 }
 
-type configUIWrapper struct {
-	form *huh.Form
+// ─── Bubble Tea wrapper for polished full-screen config UI ──────────────────
+
+type configUI struct {
+	form   *huh.Form
+	width  int
+	height int
 }
 
-func (m configUIWrapper) Init() tea.Cmd {
+func newConfigUI(form *huh.Form) configUI {
+	return configUI{form: form}
+}
+
+func (m configUI) Init() tea.Cmd {
 	return m.form.Init()
 }
 
-func (m configUIWrapper) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m configUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+		// ตรวจสอบว่าหน้าจอใหญ่พอที่จะแสดง Logo หรือไม่ (Responsive)
+		showLogo := m.height > 24
+
+		// 1. คำนวณความสูงของพื้นที่ตกแต่งอื่นๆ ที่ไม่ใช่ Form (Borders, Padding, Headers, Footer)
+		decorHeight := 10 // พื้นที่ขั้นต่ำที่ต้องหักออก (ไม่มีโลโก้)
+		if showLogo {
+			decorHeight = 18 // รวมความสูงโลโก้และการเว้นบรรทัด
+		}
+
+		// 2. คำนวณพื้นที่ความสูงที่แท้จริงให้ Form เพื่อให้ระบบ Scroll ภายในทำงานได้ถูกต้อง
+		formHeight := m.height - decorHeight
+		if formHeight < 5 {
+			formHeight = 5 // ป้องกันขนาดติดลบในจอที่แคบมากๆ
+		}
+
+		// 3. คำนวณความกว้าง
+		uiWidth := 75
+		if m.width < 80 {
+			uiWidth = m.width - 4
+		}
+		formWidth := uiWidth - 6 // หักลบความกว้างของ Border(2) และ Padding(4) ด้านข้าง
+
+		// 4. แจ้งขนาดจริงกับ form
+		m.form = m.form.WithHeight(formHeight).WithWidth(formWidth)
+
+		// 5. ส่ง WindowSizeMsg ตัวใหม่ให้ form โดยตรง (ขนาดที่หักส่วนตกแต่งออกไปแล้ว)
+		// วิธีนี้แก้ปัญหาการเลื่อนดูตัวเลือกและตัดขอบล่าง 100%
+		adjustedMsg := tea.WindowSizeMsg{
+			Width:  formWidth,
+			Height: formHeight,
+		}
+
+		form, cmd := m.form.Update(adjustedMsg)
+		if f, ok := form.(*huh.Form); ok {
+			m.form = f
+		}
+		return m, cmd
+
+	case tea.KeyMsg:
+		if msg.String() == "ctrl+c" {
+			m.form.State = huh.StateAborted
+			return m, tea.Quit
+		}
+	}
+
+	// สำหรับ Message อื่นๆ ส่งให้ Form จัดการตามปกติ
 	form, cmd := m.form.Update(msg)
 	if f, ok := form.(*huh.Form); ok {
 		m.form = f
@@ -759,51 +867,145 @@ func (m configUIWrapper) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m configUIWrapper) View() string {
+func (m configUI) View() string {
 	if m.form.State == huh.StateCompleted || m.form.State == huh.StateAborted {
 		return ""
 	}
 
-	electricBlue := lipgloss.Color("#0ea5e9")
+	w := m.width
+	if w <= 0 {
+		w = 80
+	}
+	h := m.height
+	if h <= 0 {
+		h = 24
+	}
 
-	titleStyle := lipgloss.NewStyle().
+	// Colors
+	accentDark := lipgloss.Color("#7C3AED")
+	dimText := lipgloss.Color("#6B7280")
+
+	// คำนวณความกว้างคงที่ (ถ้าจอเล็กลงก็จะหดตาม)
+	uiWidth := 75
+	if w < 80 {
+		uiWidth = w - 4 // Responsive fallback
+	}
+
+	var headerElements []string
+
+	// ─── ASCII Logo (Responsive: แสดงต่อเมื่อจอสูงกว่า 24 บรรทัด) ────────────
+	if h > 24 {
+		wutLogo := `
+ ██╗    ██╗██╗   ██╗████████╗
+ ██║    ██║██║   ██║╚══██╔══╝
+ ██║ █╗ ██║██║   ██║   ██║   
+ ╚███╔███╔╝╚██████╔╝   ██║   
+  ╚══╝╚══╝  ╚═════╝    ╚═╝   `
+
+		logoStyle := lipgloss.NewStyle().
+			Foreground(accentDark).
+			Bold(true)
+
+		subtitleStyle := lipgloss.NewStyle().
+			Foreground(dimText).
+			MarginBottom(1).
+			MarginLeft(1)
+
+		logoBlock := lipgloss.JoinVertical(lipgloss.Left,
+			logoStyle.Render(strings.TrimPrefix(wutLogo, "\n")),
+			subtitleStyle.Render("The Smart Command Line Assistant That Actually Understands You"),
+		)
+		headerElements = append(headerElements, logoBlock)
+	}
+
+	// ─── Header Tab ───────────────────────────────────────────────────────────
+	titleText := " ⚙  WUT Configuration "
+	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#FFFFFF")).
-		Background(electricBlue).
-		Padding(0, 3).
-		MarginBottom(1)
+		Background(accentDark).
+		Padding(0, 1)
+
+	// นำ Header ไปต่อท้าย Array เพื่อรอจัดวางแนวตั้ง
+	headerElements = append(headerElements, headerStyle.Render(titleText))
+	headerBlock := lipgloss.JoinVertical(lipgloss.Left, headerElements...)
+
+	// ─── Form body ────────────────────────────────────────────────────────────
+	// ขนาดความกว้างกล่อง
+	boxWidth := uiWidth
+	if boxWidth < 50 {
+		boxWidth = 50
+	}
 
 	boxStyle := lipgloss.NewStyle().
-		Border(lipgloss.ThickBorder()).
-		BorderForeground(electricBlue).
-		Padding(1, 4).
-		Margin(1, 2)
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(accentDark).
+		Padding(1, 3).
+		Width(boxWidth)
 
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		titleStyle.Render("⚡ WUT CONFIGURATION ⚡"),
-		"\n"+m.form.View(),
-	)
+	body := boxStyle.Render(m.form.View())
 
-	return boxStyle.Render(content)
+	// ─── Footer ───────────────────────────────────────────────────────────────
+	footerStyle := lipgloss.NewStyle().Foreground(dimText).MarginTop(1).MarginLeft(1)
+	footer := footerStyle.Render("↑/↓ navigate • enter/tab next page • ←/→/space toggle • ctrl+c quit")
+
+	// ─── Container รวมร่างทั้งหมด ──────────────────────────────────────────────
+	container := lipgloss.NewStyle().
+		MarginLeft(4).
+		MarginTop(1).
+		Render(lipgloss.JoinVertical(lipgloss.Left, headerBlock, body, footer))
+
+	// จัดวางชิดซ้ายบนเสมอ เพื่อไม่ให้มีปัญหา Layout เด้งหรือตัดขอบ
+	return lipgloss.Place(w, h, lipgloss.Left, lipgloss.Top, container)
 }
 
-func getPremiumConfigTheme() *huh.Theme {
+// ─── Standard configuration theme ──────────────────────────────────────────
+
+func getConfigTheme() *huh.Theme {
 	t := huh.ThemeDracula()
 
-	electricBlue := lipgloss.Color("#0ea5e9")
-	textHighlight := lipgloss.Color("#e0f2fe")
-	slate := lipgloss.Color("#64748b")
+	accent := lipgloss.Color("#A78BFA")
+	dimText := lipgloss.Color("#6B7280")
+	lightText := lipgloss.Color("#E5E7EB")
+	bgActive := lipgloss.Color("#A78BFA")
+	bgInactive := lipgloss.Color("#374151")
 
-	// Clean base padding
+	// Focused state
 	t.Focused.Base = t.Focused.Base.Border(lipgloss.HiddenBorder())
+	t.Focused.Title = t.Focused.Title.Foreground(accent).Bold(true)
+	t.Focused.Description = t.Focused.Description.Foreground(lightText)
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(accent)
+	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(accent)
+	t.Focused.SelectSelector = t.Focused.SelectSelector.Foreground(accent)
+	t.Focused.SelectedOption = t.Focused.SelectedOption.Foreground(accent)
+
+	// Yes/No Buttons Styled as solid blocks
+	t.Focused.FocusedButton = lipgloss.NewStyle().
+		Background(bgActive).
+		Foreground(lipgloss.Color("#000000")).
+		Bold(true).
+		Padding(0, 2)
+	t.Focused.BlurredButton = lipgloss.NewStyle().
+		Background(bgInactive).
+		Foreground(lightText).
+		Padding(0, 2)
+
+	// Blurred state
 	t.Blurred.Base = t.Blurred.Base.Border(lipgloss.HiddenBorder())
+	t.Blurred.Title = t.Blurred.Title.Foreground(dimText)
+	t.Blurred.Description = t.Blurred.Description.Foreground(dimText)
+	t.Blurred.TextInput.Text = t.Blurred.TextInput.Text.Foreground(dimText)
+	t.Blurred.SelectSelector = t.Blurred.SelectSelector.Foreground(dimText)
 
-	t.Focused.Title = t.Focused.Title.Foreground(electricBlue).Bold(true)
-	t.Blurred.Title = t.Blurred.Title.Foreground(slate)
-	t.Focused.Description = t.Focused.Description.Foreground(textHighlight)
-
-	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(electricBlue)
-	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(electricBlue)
+	// Unfocused confirm
+	t.Blurred.FocusedButton = lipgloss.NewStyle().
+		Background(lipgloss.Color("#4B5563")).
+		Foreground(lipgloss.Color("#9CA3AF")).
+		Padding(0, 2)
+	t.Blurred.BlurredButton = lipgloss.NewStyle().
+		Background(lipgloss.Color("#1F2937")).
+		Foreground(lipgloss.Color("#4B5563")).
+		Padding(0, 2)
 
 	return t
 }
