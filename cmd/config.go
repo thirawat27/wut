@@ -7,14 +7,15 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/spf13/cobra"
-
 	"wut/internal/config"
 	"wut/internal/logger"
 	"wut/internal/ui"
 
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/huh"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
 )
 
 // configCmd represents the config command
@@ -149,14 +150,16 @@ func runConfigUI() error {
 	historyMaxEntries := strconv.Itoa(cfg.History.MaxEntries)
 	logMaxSize := strconv.Itoa(cfg.Logging.MaxSize)
 	logMaxAge := strconv.Itoa(cfg.Logging.MaxAge)
+	confirmSave := false
+
+	// Custom keymap: Add Space to Toggle on Confirm, matching other fields
+	km := huh.NewDefaultKeyMap()
+	km.Confirm.Toggle = key.NewBinding(
+		key.WithKeys("h", "l", "right", "left", " "),
+		key.WithHelp("←/→/space", "toggle"),
+	)
 
 	form := huh.NewForm(
-		huh.NewGroup(
-			huh.NewNote().
-				Title("WUT Configuration Wizards").
-				Description("Welcome to the WUT configuration wizard.\nPress Tab to navigate, Space to toggle, Enter to save settings."),
-		).Title("Welcome"),
-
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("UI Theme").
@@ -169,13 +172,16 @@ func runConfigUI() error {
 			huh.NewConfirm().
 				Title("Show Confidence").
 				Description("Display the AI's confidence level for responses").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.UI.ShowConfidence),
 			huh.NewConfirm().
 				Title("Show Explanations").
 				Description("Display detailed explanations for commands").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.UI.ShowExplanations),
 			huh.NewConfirm().
 				Title("Syntax Highlighting").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.UI.SyntaxHighlighting),
 			huh.NewInput().
 				Title("Pagination Size").
@@ -186,9 +192,11 @@ func runConfigUI() error {
 			huh.NewConfirm().
 				Title("Enable Fuzzy Matching").
 				Description("Enable typo correction and fuzzy searching").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Fuzzy.Enabled),
 			huh.NewConfirm().
 				Title("Case Sensitive").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Fuzzy.CaseSensitive),
 			huh.NewInput().
 				Title("Max Distance").
@@ -203,41 +211,41 @@ func runConfigUI() error {
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("TLDR Pages Enabled").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.TLDR.Enabled),
 			huh.NewConfirm().
 				Title("Offline Mode").
 				Description("Never attempt to fetch pages online").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.TLDR.OfflineMode),
 			huh.NewConfirm().
 				Title("Auto Sync TLDR Pages").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.TLDR.AutoSync),
 			huh.NewInput().
 				Title("Sync Interval (days)").
 				Value(&tldrSyncInterval),
-			huh.NewSelect[string]().
-				Title("Language").
-				Options(
-					huh.NewOption("English", "en"),
-					huh.NewOption("Thai", "th"),
-				).
-				Value(&cfg.TLDR.Language),
 		).Title("TLDR Pages"),
 
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Enable Context Analysis").
 				Description("Analyze working directory for better suggestions").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.Enabled),
 			huh.NewConfirm().
 				Title("Git Integration").
 				Description("Use Git status and history for context").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.GitIntegration),
 			huh.NewConfirm().
 				Title("Project Detection").
 				Description("Detect project type (Node, Go, Python, etc.)").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.ProjectDetection),
 			huh.NewConfirm().
 				Title("Environment Vars").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Context.EnvironmentVars),
 		).Title("Context Analysis"),
 
@@ -254,18 +262,21 @@ func runConfigUI() error {
 				Value(&dbSize),
 			huh.NewConfirm().
 				Title("Backup Enabled").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Database.BackupEnabled),
 		).Title("Database Settings"),
 
 		huh.NewGroup(
 			huh.NewConfirm().
 				Title("Track History").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.History.Enabled),
 			huh.NewInput().
 				Title("Max Entries").
 				Value(&historyMaxEntries),
 			huh.NewConfirm().
 				Title("Track Frequency").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.History.TrackFrequency),
 		).Title("History Settings"),
 
@@ -273,13 +284,16 @@ func runConfigUI() error {
 			huh.NewConfirm().
 				Title("Local Only").
 				Description("Never send data to external APIs").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Privacy.LocalOnly),
 			huh.NewConfirm().
 				Title("Encrypt Local Data").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Privacy.EncryptData),
 			huh.NewConfirm().
 				Title("Anonymize Commands").
 				Description("Remove sensitive data from command history").
+				WithButtonAlignment(lipgloss.Left).
 				Value(&cfg.Privacy.AnonymizeCommands),
 		).Title("Privacy Settings"),
 
@@ -300,16 +314,34 @@ func runConfigUI() error {
 				Title("Max Age (days)").
 				Value(&logMaxAge),
 		).Title("Logging Settings"),
-	).
-		WithTheme(huh.ThemeDracula())
 
-	err := form.Run()
-	if err != nil {
-		if err == huh.ErrUserAborted {
-			fmt.Println("Configuration cancelled.")
-			return nil
-		}
+		huh.NewGroup(
+			huh.NewConfirm().
+				Title("Save Configuration?").
+				Description("Select Yes to save, or No to discard changes").
+				Affirmative("✅ Save").
+				Negative("❌ Cancel").
+				WithButtonAlignment(lipgloss.Left).
+				Value(&confirmSave),
+		).Title("Save"),
+	).
+		WithTheme(getPremiumConfigTheme()).
+		WithKeyMap(km)
+
+	// Wrap in a custom Bubble Tea model to apply a global border
+	p := tea.NewProgram(configUIWrapper{form: form}, tea.WithAltScreen())
+	if _, err := p.Run(); err != nil {
 		return err
+	}
+
+	if form.State == huh.StateAborted {
+		fmt.Println("\n❌ Configuration cancelled")
+		return nil
+	}
+
+	if !confirmSave {
+		fmt.Println("\n❌ Configuration cancelled — no changes saved")
+		return nil
 	}
 
 	// Parsing strings back to numerical values
@@ -706,4 +738,72 @@ func exportConfig(path string) error {
 
 func getConfigFile() string {
 	return config.GetConfigPath()
+}
+
+type configUIWrapper struct {
+	form *huh.Form
+}
+
+func (m configUIWrapper) Init() tea.Cmd {
+	return m.form.Init()
+}
+
+func (m configUIWrapper) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	form, cmd := m.form.Update(msg)
+	if f, ok := form.(*huh.Form); ok {
+		m.form = f
+	}
+	if m.form.State == huh.StateCompleted || m.form.State == huh.StateAborted {
+		return m, tea.Quit
+	}
+	return m, cmd
+}
+
+func (m configUIWrapper) View() string {
+	if m.form.State == huh.StateCompleted || m.form.State == huh.StateAborted {
+		return ""
+	}
+
+	electricBlue := lipgloss.Color("#0ea5e9")
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Background(electricBlue).
+		Padding(0, 3).
+		MarginBottom(1)
+
+	boxStyle := lipgloss.NewStyle().
+		Border(lipgloss.ThickBorder()).
+		BorderForeground(electricBlue).
+		Padding(1, 4).
+		Margin(1, 2)
+
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		titleStyle.Render("⚡ WUT CONFIGURATION ⚡"),
+		"\n"+m.form.View(),
+	)
+
+	return boxStyle.Render(content)
+}
+
+func getPremiumConfigTheme() *huh.Theme {
+	t := huh.ThemeDracula()
+
+	electricBlue := lipgloss.Color("#0ea5e9")
+	textHighlight := lipgloss.Color("#e0f2fe")
+	slate := lipgloss.Color("#64748b")
+
+	// Clean base padding
+	t.Focused.Base = t.Focused.Base.Border(lipgloss.HiddenBorder())
+	t.Blurred.Base = t.Blurred.Base.Border(lipgloss.HiddenBorder())
+
+	t.Focused.Title = t.Focused.Title.Foreground(electricBlue).Bold(true)
+	t.Blurred.Title = t.Blurred.Title.Foreground(slate)
+	t.Focused.Description = t.Focused.Description.Foreground(textHighlight)
+
+	t.Focused.TextInput.Cursor = t.Focused.TextInput.Cursor.Foreground(electricBlue)
+	t.Focused.TextInput.Prompt = t.Focused.TextInput.Prompt.Foreground(electricBlue)
+
+	return t
 }

@@ -60,7 +60,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 Name: "addtopath"; Description: "Add to PATH environment variable"; GroupDescription: "{cm:AdditionalIcons}"
 
 [Files]
-; Main executable - ดึงจาก build/windows/
+; Main executable - pulled from build/windows/
 Source: "..\build\windows\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
 
 ; License file

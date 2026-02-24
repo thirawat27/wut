@@ -10,8 +10,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"wut/internal/config"
 )
 
 const (
@@ -97,11 +95,7 @@ func WithLanguage(lang string) ClientOption {
 
 // NewClient creates a new TLDR API client
 func NewClient(opts ...ClientOption) *Client {
-	cfg := config.Get()
-	lang := cfg.TLDR.Language
-	if lang == "" {
-		lang = "en"
-	}
+	lang := "en"
 
 	c := &Client{
 		httpClient: &http.Client{

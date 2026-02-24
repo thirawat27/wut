@@ -111,7 +111,6 @@ type TLDRConfig struct {
 	AutoDetectOnline bool   `mapstructure:"auto_detect_online"`
 	MaxCacheAge      int    `mapstructure:"max_cache_age"` // days
 	DefaultPlatform  string `mapstructure:"default_platform"`
-	Language         string `mapstructure:"language"`
 }
 
 var (
@@ -248,7 +247,6 @@ func setDefaults() {
 	viper.SetDefault("tldr.auto_detect_online", true)
 	viper.SetDefault("tldr.max_cache_age", 30) // 30 days
 	viper.SetDefault("tldr.default_platform", "common")
-	viper.SetDefault("tldr.language", "en")
 }
 
 // createDefaultConfig creates a default configuration file

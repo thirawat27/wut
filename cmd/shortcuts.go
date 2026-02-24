@@ -21,7 +21,7 @@ func init() {
 	rootCmd.AddCommand(smartShortcutCmd())
 }
 
-// executeMainCommand ช่วย execute คำสั่งหลักด้วย os.Exec
+// executeMainCommand executes the main command using os.Exec
 func executeMainCommand(args ...string) error {
 	exe, err := os.Executable()
 	if err != nil {
@@ -263,7 +263,7 @@ func smartShortcutCmd() *cobra.Command {
 	return cmd
 }
 
-// buildArgs สร้าง argument list จาก flags ที่ถูก set
+// buildArgs builds an argument list from the set flags
 func buildArgs(cmd *cobra.Command, args []string, command string, boolFlags []string) []string {
 	var allArgs []string
 	allArgs = append(allArgs, command)
