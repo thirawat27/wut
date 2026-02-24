@@ -93,7 +93,12 @@ func runFix(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("no command provided and no recent history found to fix")
 	}
 
-	// 4. Perform correction
+	// 4a. Detect if input looks like natural language → run semantic engine
+	if looksLikeNaturalLanguage(input) {
+		return runSemanticSearch(input)
+	}
+
+	// 4b. Perform typo/flag correction
 	correction, err := c.Correct(input)
 	if err != nil {
 		return err
@@ -128,6 +133,93 @@ func runFix(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to copy to clipboard: %w", err)
 		}
 		fmt.Printf("%s Copied to clipboard\n", ui.Success("✓"))
+	}
+
+	return nil
+}
+
+// looksLikeNaturalLanguage returns true when the input appears to be a
+// human-language description rather than a shell command.
+// Heuristic: it contains ≥ 2 "natural" words AND the first word is NOT a
+// known root command.
+func looksLikeNaturalLanguage(input string) bool {
+	naturalTriggers := []string{
+		"how", "list", "show", "what", "find", "get", "display",
+		"where", "which", "delete", "remove", "stop", "restart",
+		"enter", "open", "create", "check", "view", "search",
+		"compress", "extract", "kill", "count", "run", "build",
+		"print", "clean", "logs",
+	}
+	words := strings.Fields(strings.ToLower(input))
+	if len(words) < 2 {
+		return false
+	}
+
+	// If first word is a known command, it's a shell command
+	knownCommands := map[string]bool{
+		"git": true, "docker": true, "kubectl": true, "npm": true,
+		"go": true, "python": true, "pip": true, "curl": true,
+		"ssh": true, "tar": true, "find": true, "grep": true,
+		"ls": true, "rm": true, "cp": true, "mv": true, "cat": true,
+		"systemctl": true, "apt": true, "brew": true, "cargo": true,
+		"terraform": true, "aws": true, "gcloud": true, "helm": true,
+		"wut": true,
+	}
+	if knownCommands[words[0]] {
+		return false
+	}
+
+	// Check if any natural trigger word is present
+	for _, w := range words {
+		for _, t := range naturalTriggers {
+			if w == t {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// runSemanticSearch uses the semantic engine to translate natural language
+// into shell commands and displays ranked results.
+func runSemanticSearch(query string) error {
+	results := corrector.QuerySemantic(query, 5)
+
+	if len(results) == 0 {
+		fmt.Println()
+		fmt.Println(ui.Yellow("🤔 No matching commands found for: ") + lipgloss.NewStyle().Bold(true).Render(query))
+		fmt.Println("Try rephrasing, e.g: \"list running containers\" or \"undo last commit\"")
+		return nil
+	}
+
+	fmt.Println()
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
+	fmt.Println(headerStyle.Render("🧠 Semantic Match: " + "\"" + query + "\""))
+	fmt.Println()
+
+	for i, match := range results {
+		confColor := "#10B981"
+		if match.Confidence < 0.7 {
+			confColor = "#F59E0B"
+		}
+		if match.Confidence < 0.4 {
+			confColor = "#6B7280"
+		}
+
+		numStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#8B5CF6")).Bold(true)
+		cmdStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true)
+		descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+		confStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(confColor))
+		catStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6366F1"))
+
+		fmt.Printf("  %s  %s\n",
+			numStyle.Render(fmt.Sprintf("[%d]", i+1)),
+			cmdStyle.Render(match.Intent.Command))
+		fmt.Printf("     %s\n", descStyle.Render(match.Intent.Description))
+		fmt.Printf("     %s  %s\n",
+			catStyle.Render("#"+match.Intent.Category),
+			confStyle.Render(fmt.Sprintf("%.0f%% match", match.Confidence*100)))
+		fmt.Println()
 	}
 
 	return nil
