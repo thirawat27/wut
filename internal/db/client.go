@@ -49,6 +49,9 @@ type Page struct {
 	RawContent  string
 }
 
+// variableRe is used to format TLDR command examples
+var variableRe = regexp.MustCompile(`\{\{([^}]+)\}\}`)
+
 // Example represents a command example from TLDR
 type Example struct {
 	Description string
@@ -468,8 +471,7 @@ func (c *Client) parsePage(content, name, platform, language string) *Page {
 // formatCommand formats a command by replacing {{variable}} placeholders
 func formatCommand(cmd string) string {
 	// Replace {{variable}} with <variable>
-	re := regexp.MustCompile(`\{\{([^}]+)\}\}`)
-	return re.ReplaceAllString(cmd, "<$1>")
+	return variableRe.ReplaceAllString(cmd, "<$1>")
 }
 
 // GetAvailableCommands returns a list of available commands from local storage

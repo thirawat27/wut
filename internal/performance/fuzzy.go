@@ -2,8 +2,9 @@
 package performance
 
 import (
-	"math"
 	"unicode"
+
+	"github.com/lithammer/fuzzysearch/fuzzy"
 )
 
 // FastMatcher provides high-performance fuzzy matching
@@ -83,9 +84,9 @@ func (m *FastMatcher) Match(query, target string) MatchResult {
 	// Fuzzy match
 	matched, positions := fuzzyMatch(query, target)
 	if !matched {
-		// Try Levenshtein distance
-		dist := boundedLevenshtein(query, target, m.maxDistance)
-		if dist < 0 {
+		// Try highly optimized Levenshtein distance from fuzzysearch
+		dist := fuzzy.LevenshteinDistance(query, target)
+		if dist > m.maxDistance {
 			return MatchResult{Score: 0, Matched: false}
 		}
 
@@ -223,84 +224,6 @@ func calculateFuzzyScore(query, target string, positions []int) float64 {
 	return minFloat64(score, 1.0)
 }
 
-// boundedLevenshtein calculates Levenshtein distance with early termination
-// Returns -1 if distance exceeds maxDist
-func boundedLevenshtein(s, t string, maxDist int) int {
-	if maxDist <= 0 {
-		maxDist = math.MaxInt32
-	}
-
-	lenS := len(s)
-	lenT := len(t)
-
-	// Early termination checks
-	if absInt(lenS-lenT) > maxDist {
-		return -1
-	}
-
-	// Ensure s is the shorter string
-	if lenS > lenT {
-		s, t = t, s
-		lenS, lenT = lenT, lenS
-	}
-
-	// Use two rows for space efficiency
-	previous := make([]int, lenS+1)
-	current := make([]int, lenS+1)
-
-	// Initialize first row
-	for i := 0; i <= lenS; i++ {
-		previous[i] = i
-	}
-
-	minInRow := 0
-	for j := 1; j <= lenT; j++ {
-		current[0] = j
-		minInRow = current[0]
-
-		// Determine search range based on maxDist
-		start := 1
-		end := lenS
-
-		if maxDist < math.MaxInt32 {
-			// Limit search to band around diagonal
-			start = maxInt(1, j-maxDist)
-			end = minInt(lenS, j+maxDist)
-		}
-
-		for i := start; i <= end; i++ {
-			cost := 0
-			if s[i-1] != t[j-1] {
-				cost = 1
-			}
-
-			deletion := previous[i] + 1
-			insertion := current[i-1] + 1
-			substitution := previous[i-1] + cost
-
-			current[i] = minInt(minInt(deletion, insertion), substitution)
-
-			if current[i] < minInRow {
-				minInRow = current[i]
-			}
-		}
-
-		// Early termination check
-		if minInRow > maxDist {
-			return -1
-		}
-
-		// Swap rows
-		previous, current = current, previous
-	}
-
-	dist := previous[lenS]
-	if dist > maxDist {
-		return -1
-	}
-	return dist
-}
-
 // fastToLowerASCII converts ASCII string to lowercase
 func fastToLowerASCII(s string) string {
 	// Check if conversion needed
@@ -386,25 +309,12 @@ func partitionScoredMatches(arr []ScoredMatch, low, high int) int {
 }
 
 // Utility functions
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 func maxInt(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
-}
-
-func absInt(a int) int {
-	if a < 0 {
-		return -a
-	}
-	return a
 }
 
 func minFloat64(a, b float64) float64 {

@@ -3,7 +3,6 @@ package db
 
 import (
 	"archive/zip"
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -15,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
 	"wut/internal/concurrency"
 	"wut/internal/logger"
 )
@@ -100,12 +98,12 @@ func (sm *SyncManager) SyncFromLocalDir(ctx context.Context, pagesDir string) (*
 
 	sm.log.Info("reading local pages directory", "dir", pagesDir)
 
-	err := filepath.Walk(pagesDir, func(path string, info os.FileInfo, err error) error {
+	err := filepath.WalkDir(pagesDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 
-		if info.IsDir() || !strings.HasSuffix(path, ".md") {
+		if d.IsDir() || !strings.HasSuffix(path, ".md") {
 			return nil
 		}
 
@@ -169,18 +167,26 @@ func (sm *SyncManager) SyncFromZip(ctx context.Context, zipURL string) (*SyncRes
 		return nil, fmt.Errorf("unexpected status code downloading zip: %d", resp.StatusCode)
 	}
 
-	// Read full zip into memory
-	body, err := io.ReadAll(resp.Body)
+	// Stream download to temporary file to avoid huge RAM spike
+	tmpFile, err := os.CreateTemp("", "tldr-archive-*.zip")
 	if err != nil {
-		return nil, fmt.Errorf("failed to read zip body: %w", err)
+		return nil, fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+	defer tmpFile.Close()
+
+	size, err := io.Copy(tmpFile, resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to download zip stream: %w", err)
 	}
 
-	sm.log.Info("archive downloaded", "size", len(body))
+	sm.log.Info("archive downloaded via stream", "size", size)
 
-	zipReader, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
+	zipReader, err := zip.OpenReader(tmpFile.Name())
 	if err != nil {
 		return nil, fmt.Errorf("invalid zip file: %w", err)
 	}
+	defer zipReader.Close()
 
 	var pages []*Page
 

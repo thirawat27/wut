@@ -2,6 +2,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 
+	"time"
 	"wut/internal/alias"
 	appctx "wut/internal/context"
 	"wut/internal/ui"
@@ -83,8 +85,11 @@ func runAlias(cmd *cobra.Command, args []string) error {
 }
 
 func generateAliases(manager *alias.Manager) error {
+	cmdCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
 	analyzer := appctx.NewAnalyzer()
-	ctx, err := analyzer.Analyze()
+	ctx, err := analyzer.Analyze(cmdCtx)
 	if err != nil {
 		return err
 	}

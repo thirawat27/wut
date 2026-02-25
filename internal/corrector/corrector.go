@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/agnivade/levenshtein"
+	"github.com/hbollon/go-edlib"
 )
 
 // Correction represents a suggested correction
@@ -310,7 +310,7 @@ func (c *Corrector) checkHistory(command string) *Correction {
 		if diff := cmdLen - len(h); diff < -bestDist || diff > bestDist {
 			continue
 		}
-		d := levenshtein.ComputeDistance(command, h)
+		d := edlib.OSADamerauLevenshteinDistance(command, h)
 		if d > 0 && d < bestDist {
 			bestDist = d
 			best = h
@@ -478,7 +478,7 @@ func bestMatch(token string, corpus []string, maxDist int) (string, int) {
 		if diff := tokenLen - len(candidate); diff < -maxDist || diff > maxDist {
 			continue
 		}
-		d := levenshtein.ComputeDistance(token, candidate)
+		d := edlib.OSADamerauLevenshteinDistance(token, candidate)
 		if d == 0 {
 			return "", 0 // exact match → no correction needed
 		}

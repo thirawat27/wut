@@ -367,10 +367,7 @@ func (s *Storage) GetStats() (map[string]any, error) {
 // SearchLocal searches pages in local storage by name or description
 func (s *Storage) SearchLocal(query string) ([]StoredPage, error) {
 	var results []StoredPage
-	queryLower := ""
-	for _, r := range query {
-		queryLower += string(r | 32) // to lowercase
-	}
+	queryLower := strings.ToLower(query)
 
 	pages, err := s.GetAllPages()
 	if err != nil {
@@ -378,24 +375,13 @@ func (s *Storage) SearchLocal(query string) ([]StoredPage, error) {
 	}
 
 	for _, page := range pages {
-		var nameLower strings.Builder
-		for _, r := range page.Name {
-			nameLower.WriteString(string(r | 32))
-		}
-		var descLower strings.Builder
-		for _, r := range page.Description {
-			descLower.WriteString(string(r | 32))
-		}
+		nameLower := strings.ToLower(page.Name)
+		descLower := strings.ToLower(page.Description)
 
-		if contains(nameLower.String(), queryLower) || contains(descLower.String(), queryLower) {
+		if strings.Contains(nameLower, queryLower) || strings.Contains(descLower, queryLower) {
 			results = append(results, page)
 		}
 	}
 
 	return results, nil
-}
-
-// contains checks if s contains substr
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
 }

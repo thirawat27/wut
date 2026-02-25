@@ -12,6 +12,8 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.2
 	github.com/goccy/go-json v0.10.5
+	github.com/hbollon/go-edlib v1.7.0
+	github.com/lithammer/fuzzysearch v1.1.8
 	github.com/muesli/reflow v0.3.0
 	github.com/panjf2000/ants/v2 v2.11.5
 	github.com/sahilm/fuzzy v0.1.1

@@ -22,7 +22,7 @@ LDFLAGS=-ldflags "-s -w \
 
 # Go settings
 GOCMD=go
-GOBUILD=$(GOCMD) build
+GOBUILD=$(GOCMD) build -trimpath
 GOCLEAN=$(GOCMD) clean
 GOTEST=$(GOCMD) test
 GOGET=$(GOCMD) get

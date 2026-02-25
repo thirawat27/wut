@@ -14,6 +14,8 @@ import (
 	"wut/internal/context"
 )
 
+var aliasPattern = regexp.MustCompile(`^alias\s+([^=]+)=['"]?(.+?)['"]?\s*(?:#.*)?$`)
+
 // Alias represents a shell alias
 type Alias struct {
 	Name        string
@@ -332,9 +334,13 @@ func (m *Manager) isValidName(name string) bool {
 	if name == "" {
 		return false
 	}
-	// Only allow alphanumeric and underscore
-	matched, _ := regexp.MatchString(`^[a-zA-Z0-9_]+$`, name)
-	return matched
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 // loadFromShell loads aliases from shell configuration
@@ -365,7 +371,6 @@ func (m *Manager) loadFromShell() (map[string]string, error) {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	aliasPattern := regexp.MustCompile(`^alias\s+([^=]+)=['"]?(.+?)['"]?\s*(?:#.*)?$`)
 
 	for scanner.Scan() {
 		line := scanner.Text()

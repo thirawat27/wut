@@ -2,11 +2,11 @@
 package context
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"slices"
 	"strings"
@@ -51,7 +51,7 @@ func NewAnalyzer() *Analyzer {
 }
 
 // Analyze analyzes the current context
-func (a *Analyzer) Analyze() (*Context, error) {
+func (a *Analyzer) Analyze(ctx context.Context) (*Context, error) {
 	// Get working directory
 	wd, err := os.Getwd()
 	if err != nil {
@@ -76,7 +76,7 @@ func (a *Analyzer) Analyze() (*Context, error) {
 	a.context.Shell = detectShell()
 
 	// Analyze git context
-	a.analyzeGit()
+	a.analyzeGit(ctx)
 
 	// Detect project type
 	a.detectProjectType()
@@ -88,7 +88,7 @@ func (a *Analyzer) Analyze() (*Context, error) {
 }
 
 // analyzeGit analyzes git repository context
-func (a *Analyzer) analyzeGit() {
+func (a *Analyzer) analyzeGit(ctx context.Context) {
 	// Check if in a git repository
 	gitDir := findGitDir(a.context.WorkingDir)
 	if gitDir == "" {
@@ -99,20 +99,20 @@ func (a *Analyzer) analyzeGit() {
 	a.context.IsGitRepo = true
 
 	// Get current branch
-	if branch, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
+	if branch, err := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
 		a.context.GitBranch = strings.TrimSpace(string(branch))
 	}
 
 	// Get git status
-	a.context.GitStatus = a.getGitStatus()
+	a.context.GitStatus = a.getGitStatus(ctx)
 }
 
 // getGitStatus gets detailed git status
-func (a *Analyzer) getGitStatus() GitStatus {
+func (a *Analyzer) getGitStatus(ctx context.Context) GitStatus {
 	status := GitStatus{}
 
 	// Check if clean
-	if output, err := exec.Command("git", "status", "--porcelain").Output(); err == nil {
+	if output, err := exec.CommandContext(ctx, "git", "status", "--porcelain").Output(); err == nil {
 		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 		status.IsClean = len(lines) == 0 || (len(lines) == 1 && lines[0] == "")
 
@@ -157,7 +157,7 @@ func (a *Analyzer) getGitStatus() GitStatus {
 	}
 
 	// Get ahead/behind
-	if output, err := exec.Command("git", "rev-list", "--left-right", "--count", "HEAD...@{u}").Output(); err == nil {
+	if output, err := exec.CommandContext(ctx, "git", "rev-list", "--left-right", "--count", "HEAD...@{u}").Output(); err == nil {
 		var ahead, behind int
 		if _, err := fmt.Sscanf(string(output), "%d\t%d", &ahead, &behind); err == nil {
 			status.Ahead = ahead
@@ -400,7 +400,14 @@ func detectShell() string {
 }
 
 func matchPattern(files []string, pattern string) bool {
-	// Simple glob matching
-	re := regexp.MustCompile("^" + strings.ReplaceAll(regexp.QuoteMeta(pattern), "\\*", ".*") + "$")
-	return slices.ContainsFunc(files, re.MatchString)
+	// Fast prefix search if no wildcard
+	if !strings.Contains(pattern, "*") {
+		return slices.Contains(files, pattern)
+	}
+	for _, f := range files {
+		if matched, _ := filepath.Match(pattern, f); matched {
+			return true
+		}
+	}
+	return false
 }

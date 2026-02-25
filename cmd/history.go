@@ -1,12 +1,14 @@
 package cmd
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"math"
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -252,7 +254,7 @@ func (m historyModel) View() string {
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
 	titleStr := headerStyle.Render("📜 Execution Log (Newest First)")
 
-	s := ""
+	var sb strings.Builder
 	if m.msg != "" {
 		alertIcon := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Render("✔️  ")
 		alertText := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Bold(true).Render(m.msg)
@@ -274,9 +276,9 @@ func (m historyModel) View() string {
 		titleBox := lipgloss.NewStyle().Height(lipgloss.Height(alertStr)).AlignVertical(lipgloss.Center).Render(titleStr)
 		spaceBox := lipgloss.NewStyle().Width(padding).Render("")
 
-		s = lipgloss.JoinHorizontal(lipgloss.Center, titleBox, spaceBox, alertStr) + "\n\n"
+		sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Center, titleBox, spaceBox, alertStr) + "\n\n")
 	} else {
-		s = titleStr + "\n\n"
+		sb.WriteString(titleStr + "\n\n")
 	}
 
 	indexStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Width(4).Align(lipgloss.Right)
@@ -315,19 +317,19 @@ func (m historyModel) View() string {
 
 		if showTime {
 			timeStr := entry.Timestamp.Local().Format("01-02 15:04")
-			s += fmt.Sprintf("%s %s %s   %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), metaStyle.Render("["+timeStr+"]"), cmdStyle.Render(dispCmd))
+			sb.WriteString(fmt.Sprintf("%s %s %s   %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), metaStyle.Render("["+timeStr+"]"), cmdStyle.Render(dispCmd)))
 		} else {
-			s += fmt.Sprintf("%s %s %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), cmdStyle.Render(dispCmd))
+			sb.WriteString(fmt.Sprintf("%s %s %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), cmdStyle.Render(dispCmd)))
 		}
 	}
 
-	s += lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
-		fmt.Sprintf("Showing %d unique executions out of %d total recorded.", len(m.entries), m.total))
-	s += "\n\n"
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render(
+		fmt.Sprintf("Showing %d unique executions out of %d total recorded.", len(m.entries), m.total)))
+	sb.WriteString("\n\n")
 
 	// ── Footer text (responsive) ──────────────────────────────────────────────
 	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
-	s += footerStyle.Render(fmt.Sprintf("Page %d/%d", m.page+1, m.numPages))
+	sb.WriteString(footerStyle.Render(fmt.Sprintf("Page %d/%d", m.page+1, m.numPages)))
 
 	var footerNav string
 	if w >= 90 {
@@ -337,7 +339,7 @@ func (m historyModel) View() string {
 	} else {
 		footerNav = " | ↑/↓ | ←/→ | c | q"
 	}
-	s += lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(footerNav + "\n")
+	sb.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render(footerNav + "\n"))
 
 	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -345,7 +347,7 @@ func (m historyModel) View() string {
 		Padding(1, boxPadX).
 		Width(boxWidth)
 
-	return boxStyle.Render(strings.TrimRight(s, "\n"))
+	return boxStyle.Render(strings.TrimRight(sb.String(), "\n"))
 }
 
 func showHistory(ctx context.Context, storage *db.Storage) error {
@@ -406,13 +408,9 @@ func searchHistoryOptimized(storage *db.Storage, query string, limit int) ([]db.
 		}
 	}
 
-	for i := range scored {
-		for j := i + 1; j < len(scored); j++ {
-			if scored[j].score > scored[i].score {
-				scored[i], scored[j] = scored[j], scored[i]
-			}
-		}
-	}
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
 
 	if limit > 0 && len(scored) > limit {
 		scored = scored[:limit]
@@ -565,23 +563,30 @@ func detectShellHistories() map[string]string {
 }
 
 func readShellHistory(shellType, path string) ([]string, error) {
-	data, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer file.Close()
 
 	var commands []string
-	lines := strings.Split(string(data), "\n")
+	scanner := bufio.NewScanner(file)
+
+	// Increase max line length for large history entries
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024)
 
 	switch shellType {
 	case "fish":
-		for _, line := range lines {
+		for scanner.Scan() {
+			line := scanner.Text()
 			if after, ok := strings.CutPrefix(line, "- cmd: "); ok {
 				commands = append(commands, after)
 			}
 		}
 	case "zsh":
-		for _, line := range lines {
+		for scanner.Scan() {
+			line := scanner.Text()
 			if _, after, ok := strings.Cut(line, ";"); ok {
 				commands = append(commands, after)
 			} else if line != "" {
@@ -589,11 +594,16 @@ func readShellHistory(shellType, path string) ([]string, error) {
 			}
 		}
 	default:
-		for _, line := range lines {
-			if line = strings.TrimSpace(line); line != "" {
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
 				commands = append(commands, line)
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, err
 	}
 	return commands, nil
 }

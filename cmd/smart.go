@@ -62,7 +62,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 
 	// Detect context with timeout
 	analyzer := appctx.NewAnalyzer()
-	appCtx, err := analyzer.Analyze()
+	appCtx, err := analyzer.Analyze(ctx)
 	if err != nil {
 		log.Warn("failed to detect context", "error", err)
 		appCtx = &appctx.Context{
