@@ -57,6 +57,11 @@ func (c *Corrector) Correct(command string) (*Correction, error) {
 		return d, nil
 	}
 
+	// 1.5 Evaluate error combinations (100% matched rules based on command output)
+	if ruleFix := c.evaluateErrorRules(command); ruleFix != nil {
+		return ruleFix, nil
+	}
+
 	// 2. Full-sentence, context-aware typo scan
 	if fix := c.correctSentence(command); fix != nil {
 		return fix, nil
