@@ -64,21 +64,11 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.CommandExecution
 		freqs[e.Command]++
 	}
 
-	seen := make(map[string]bool)
-
-	for _, entry := range entries {
-		cmd := entry.Command
+	for cmd, usageCount := range freqs {
 		cmdLower := strings.ToLower(cmd)
-
-		if seen[cmd] {
-			continue
-		}
-		seen[cmd] = true
 
 		score := 0.0
 		source := "history"
-
-		usageCount := freqs[cmd]
 
 		if query == "" {
 			score = float64(usageCount) * 10.0
@@ -93,12 +83,22 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.CommandExecution
 			score = 300.0 + float64(usageCount)*3.0
 			source = "substring"
 		} else {
-			distance := levenshtein.ComputeDistance(query, cmdLower)
-			maxLen := max(len(cmdLower), len(query))
-			if maxLen > 0 && distance <= maxLen/2 {
-				similarity := 1.0 - float64(distance)/float64(maxLen)
-				score = similarity * 100.0 * float64(usageCount)
-				source = "fuzzy"
+			lenDiff := len(cmdLower) - len(query)
+			if lenDiff < 0 {
+				lenDiff = -lenDiff
+			}
+			maxLen := len(cmdLower)
+			if len(query) > maxLen {
+				maxLen = len(query)
+			}
+
+			if maxLen > 0 && lenDiff <= maxLen/2 {
+				distance := levenshtein.ComputeDistance(query, cmdLower)
+				if distance <= maxLen/2 {
+					similarity := 1.0 - float64(distance)/float64(maxLen)
+					score = similarity * 100.0 * float64(usageCount)
+					source = "fuzzy"
+				}
 			}
 		}
 
@@ -114,13 +114,12 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.CommandExecution
 	if query != "" && len(results) < 3 {
 		commonCmds := getCommonCommands(query)
 		for _, cmd := range commonCmds {
-			if !seen[cmd] {
+			if freqs[cmd] == 0 {
 				results = append(results, Result{
 					Command: cmd,
 					Score:   50.0,
 					Source:  "common",
 				})
-				seen[cmd] = true
 			}
 		}
 	}
@@ -147,9 +146,19 @@ func getCommonCommands(query string) []string {
 
 	var matches []string
 	for _, cmd := range common {
-		cmdLower := strings.ToLower(cmd)
-		if strings.Contains(cmdLower, query) || levenshtein.ComputeDistance(query, cmdLower) <= 3 {
+		if strings.Contains(cmd, query) {
 			matches = append(matches, cmd)
+			continue
+		}
+
+		lenDiff := len(cmd) - len(query)
+		if lenDiff < 0 {
+			lenDiff = -lenDiff
+		}
+		if lenDiff <= 3 {
+			if levenshtein.ComputeDistance(query, cmd) <= 3 {
+				matches = append(matches, cmd)
+			}
 		}
 	}
 

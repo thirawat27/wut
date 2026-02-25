@@ -29,9 +29,16 @@ type Config struct {
 
 // AppConfig holds application settings
 type AppConfig struct {
-	Name    string `mapstructure:"name"`
-	Version string `mapstructure:"version"`
-	Debug   bool   `mapstructure:"debug"`
+	Name        string `mapstructure:"name"`
+	Version     string `mapstructure:"version"`
+	Debug       bool   `mapstructure:"debug"`
+	Initialized bool   `mapstructure:"initialized"`
+}
+
+// IsInitialized returns true when the user has completed `wut init`
+func IsInitialized() bool {
+	cfg := Get()
+	return cfg.App.Initialized
 }
 
 // FuzzyConfig holds fuzzy matching settings
@@ -222,6 +229,7 @@ func setDefaults() {
 	viper.SetDefault("app.name", "wut")
 	viper.SetDefault("app.version", "1.0.0")
 	viper.SetDefault("app.debug", false)
+	viper.SetDefault("app.initialized", false)
 
 	viper.SetDefault("fuzzy.enabled", true)
 	viper.SetDefault("fuzzy.case_sensitive", false)
@@ -258,6 +266,7 @@ app:
   name: "wut"
   version: "1.0.0"
   debug: false
+  initialized: false
 
 fuzzy:
   enabled: true

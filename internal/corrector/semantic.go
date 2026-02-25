@@ -13,10 +13,10 @@ package corrector
 // ──────────────────────────────────────────────────────────────────────────────
 
 import (
+	"github.com/sahilm/fuzzy"
 	"math"
 	"sort"
 	"strings"
-	"github.com/sahilm/fuzzy"
 )
 
 // Intent represents a natural-language pattern that maps to a shell command.

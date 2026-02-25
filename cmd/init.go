@@ -16,7 +16,6 @@ import (
 
 	"wut/internal/config"
 	"wut/internal/logger"
-	"wut/internal/shell"
 	"wut/internal/ui"
 )
 
@@ -58,13 +57,13 @@ func init() {
 
 // Global UI colors
 var (
-	cBlue     = lipgloss.Color("#00B4D8")
-	cCyan     = lipgloss.Color("#90E0EF")
-	cGreen    = lipgloss.Color("#2DC653")
-	cAmber    = lipgloss.Color("#FFAA00")
-	cPink     = lipgloss.Color("#FF70A6")
-	cGray     = lipgloss.Color("#6C757D")
-	cDarkGray = lipgloss.Color("#343A40")
+	cBlue     = lipgloss.Color("#8B5CF6") // Changed to Purple/Violet for UI
+	cCyan     = lipgloss.Color("#C4B5FD") // Light Purple
+	cGreen    = lipgloss.Color("#10B981")
+	cAmber    = lipgloss.Color("#F59E0B")
+	cPink     = lipgloss.Color("#EC4899")
+	cGray     = lipgloss.Color("#6B7280")
+	cDarkGray = lipgloss.Color("#374151")
 	cWhite    = lipgloss.Color("#F8F9FA")
 )
 
@@ -259,7 +258,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// ─── Step 3: Shell Integration ─────────────────────────────────────────────
+	// ─── Step 3: Shell Integration (auto-install, merged from 'wut install') ──
 	if !initSkipShell {
 		shellType := initShell
 		if shellType == "" {
@@ -269,22 +268,30 @@ func runInit(cmd *cobra.Command, args []string) error {
 		if !initQuick {
 			printStep("🐚", "Shell Integration")
 			fmt.Printf("    Detected active shell: %s\n\n", valFmt(shellType))
+			fmt.Printf("    %s\n\n", lipgloss.NewStyle().Foreground(cGray).Render("Installing key bindings, command-not-found hooks, and pro-tips..."))
+		}
 
-			if askYN("Install shell hooks for quick aliases? [Y/n]:", true) {
-				if err := setupShellIntegration(shellType); err != nil {
-					printWarn("Integration interrupted: " + err.Error())
+		// Auto-install shell integration (replaces separate 'wut install' step)
+		if err := installShellIntegration(shellType); err != nil {
+			if !initQuick {
+				if err.Error() == "already installed" {
+					printOK("Shell hooks already installed")
 				} else {
-					printOK("Hooks installed successfully")
-					fmt.Printf("      %s Type %s to apply immediately.\n",
-						lipgloss.NewStyle().Foreground(cPink).Render("→"),
-						lipgloss.NewStyle().Foreground(cWhite).Render("source "+getShellRcFile(shellType)),
-					)
+					printWarn("Shell integration: " + err.Error())
 				}
-			} else {
-				printOK("Skipped — run 'wut install --shell " + shellType + "' later when needed")
 			}
 		} else {
-			fmt.Printf("Shell: %s  →  run: wut install --shell %s\n", shellType, shellType)
+			if !initQuick {
+				printOK("Hooks installed successfully")
+				reloadCmd := "source " + getShellRcFile(shellType)
+				if shellType == "powershell" || shellType == "pwsh" {
+					reloadCmd = ". " + getShellRcFile(shellType)
+				}
+				fmt.Printf("      %s Type %s to apply immediately.\n",
+					lipgloss.NewStyle().Foreground(cPink).Render("→"),
+					lipgloss.NewStyle().Foreground(cWhite).Render(reloadCmd),
+				)
+			}
 		}
 	}
 
@@ -318,6 +325,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 		} else {
 			fmt.Println("Download TLDR pages: wut tldr sync")
 		}
+	}
+
+	// ─── Mark as initialized ──────────────────────────────────────────────────
+	cfg.App.Initialized = true
+	if err := config.Save(); err != nil {
+		log.Error("failed to mark as initialized", "error", err)
 	}
 
 	// ─── Done Card ─────────────────────────────────────────────────────────────
@@ -365,6 +378,8 @@ func detectShellForInit() string {
 			return "zsh"
 		case strings.Contains(sh, "fish"):
 			return "fish"
+		case strings.Contains(sh, "pwsh"):
+			return "pwsh"
 		}
 	}
 	if runtime.GOOS == "windows" {
@@ -385,16 +400,11 @@ func getShellRcFile(shellType string) string {
 		return home + "/.zshrc"
 	case "fish":
 		return home + "/.config/fish/config.fish"
-	case "powershell":
+	case "powershell", "pwsh":
 		return "$PROFILE"
 	default:
 		return home + "/.bashrc"
 	}
-}
-
-func setupShellIntegration(shellType string) error {
-	installer := shell.NewInstaller()
-	return installer.Install(shellType)
 }
 
 func boolToEnabled(b bool) string {

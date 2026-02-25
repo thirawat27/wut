@@ -9,8 +9,9 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/spf13/cobra"
 	"wut/internal/shell"
+
+	"github.com/spf13/cobra"
 )
 
 // installCmd represents the install command
@@ -122,7 +123,11 @@ func installShellIntegration(sh string) error {
 	fmt.Println("  • Ctrl+Space - Open WUT TUI")
 	fmt.Println("  • Ctrl+G     - Open WUT with current command")
 	fmt.Println()
-	fmt.Printf("Please restart your shell or run: source %s\n", configFile)
+	reloadCmd := "source " + configFile
+	if sh == "powershell" || sh == "pwsh" {
+		reloadCmd = ". " + configFile
+	}
+	fmt.Printf("Please restart your shell or run: %s\n", reloadCmd)
 
 	_ = installer // Use the installer
 	return nil
@@ -168,7 +173,11 @@ func uninstallShellIntegration(sh string) error {
 	}
 
 	fmt.Println("✅ Successfully uninstalled!")
-	fmt.Printf("Please restart your shell or run: source %s\n", configFile)
+	reloadCmd := "source " + configFile
+	if sh == "powershell" || sh == "pwsh" {
+		reloadCmd = ". " + configFile
+	}
+	fmt.Printf("Please restart your shell or run: %s\n", reloadCmd)
 
 	return nil
 }
@@ -217,10 +226,10 @@ func detectShell() string {
 func detectAllShells() []string {
 	var shells []string
 
-	// Check for common shells
-	candidates := []string{"bash", "zsh", "fish"}
+	// Check for common cross-platform shells
+	candidates := []string{"bash", "zsh", "fish", "pwsh"}
 	if runtime.GOOS == "windows" {
-		candidates = []string{"powershell"}
+		candidates = []string{"powershell", "pwsh", "cmd", "bash", "zsh", "fish"}
 	}
 
 	for _, sh := range candidates {
@@ -246,8 +255,22 @@ func getShellConfigFile(sh string) (string, error) {
 	case "fish":
 		return filepath.Join(home, ".config", "fish", "config.fish"), nil
 	case "powershell", "pwsh":
+		// Query PowerShell for the profile path directly
+		cmd := exec.Command(sh, "-NoProfile", "-Command", "Write-Output $PROFILE")
+		if out, err := cmd.Output(); err == nil {
+			profile := strings.TrimSpace(string(out))
+			if profile != "" {
+				// Ensure parent directory exists
+				dir := filepath.Dir(profile)
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					return "", fmt.Errorf("failed to create profile directory: %w", err)
+				}
+				return profile, nil
+			}
+		}
+
 		if runtime.GOOS == "windows" {
-			// Try PowerShell Core first, then Windows PowerShell
+			// Try PowerShell Core first, then Windows PowerShell as fallback
 			psCorePath := filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
 			psWinPath := filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
 
@@ -262,7 +285,7 @@ func getShellConfigFile(sh string) (string, error) {
 			// Default to PowerShell Core path (newer)
 			return psCorePath, nil
 		}
-		// Linux/macOS PowerShell
+		// Linux/macOS PowerShell fallback
 		return filepath.Join(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1"), nil
 	default:
 		return "", fmt.Errorf("unsupported shell: %s", sh)

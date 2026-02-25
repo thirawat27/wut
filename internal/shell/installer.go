@@ -106,8 +106,28 @@ func GetConfigFile(shell string) (string, error) {
 	case "fish":
 		return filepath.Join(home, ".config", "fish", "config.fish"), nil
 	case "powershell", "pwsh":
+		cmd := exec.Command(shell, "-NoProfile", "-Command", "Write-Output $PROFILE")
+		if out, err := cmd.Output(); err == nil {
+			profile := strings.TrimSpace(string(out))
+			if profile != "" {
+				dir := filepath.Dir(profile)
+				if err := os.MkdirAll(dir, 0755); err != nil {
+					return "", fmt.Errorf("failed to create profile directory: %w", err)
+				}
+				return profile, nil
+			}
+		}
+
 		if runtime.GOOS == "windows" {
-			return filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1"), nil
+			psCorePath := filepath.Join(home, "Documents", "PowerShell", "Microsoft.PowerShell_profile.ps1")
+			psWinPath := filepath.Join(home, "Documents", "WindowsPowerShell", "Microsoft.PowerShell_profile.ps1")
+			if _, err := os.Stat(psCorePath); err == nil {
+				return psCorePath, nil
+			}
+			if _, err := os.Stat(psWinPath); err == nil {
+				return psWinPath, nil
+			}
+			return psCorePath, nil
 		}
 		return filepath.Join(home, ".config", "powershell", "Microsoft.PowerShell_profile.ps1"), nil
 	default:
@@ -151,7 +171,36 @@ __wut_with_current() {
     wut suggest "$cmd"
 }
 
+# Auto-Trigger (Command Not Found Hook)
+command_not_found_handle() {
+    wut fix "$*"
+    return 127
+}
+command_not_found_handler() {
+    wut fix "$*"
+    return 127
+}
+
+# Proactive Tips Hook
+__wut_protip() {
+    local exitStatus=$?
+    if [[ -n "$BASH_VERSION" ]]; then
+        wut pro-tip "$(history 1 | sed -e 's/^[ ]*[0-9]*[ ]*//')"
+    elif [[ -n "$ZSH_VERSION" ]]; then
+        wut pro-tip "$(fc -ln -1)"
+    fi
+    return $exitStatus
+}
+
+if [[ -n "$BASH_VERSION" ]]; then
+    PROMPT_COMMAND="__wut_protip; $PROMPT_COMMAND"
+elif [[ -n "$ZSH_VERSION" ]]; then
+    autoload -Uz add-zsh-hook 2>/dev/null
+    add-zsh-hook precmd __wut_protip 2>/dev/null || true
+fi
+
 # Ctrl+Space - Open WUT TUI
+
 bind '"\C-@":"\C-uwut suggest\C-m"' 2>/dev/null || true
 
 # Ctrl+G - Open WUT with current command
@@ -170,6 +219,16 @@ function __wut_with_current
     set -l cmd (commandline)
     wut suggest $cmd
     commandline -f repaint
+end
+
+# Auto-Trigger (Command Not Found Hook)
+function fish_command_not_found
+    wut fix "$argv"
+end
+
+# Proactive Tips Hook
+function __wut_protip --on-event fish_prompt
+    wut pro-tip "$history[1]"
 end
 
 # Ctrl+Space - Open WUT TUI
@@ -197,6 +256,13 @@ function Invoke-WUT-WithCurrent {
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
 }
 
+# Auto-Trigger (Command Not Found Hook)
+$ExecutionContext.InvokeCommand.CommandNotFoundAction = {
+    param([string]$commandName, [System.Management.Automation.CommandLookupEventArgs]$commandLookupEventArgs)
+    wut fix "$commandName"
+    $commandLookupEventArgs.CommandScriptBlock = { }
+}
+
 # Set up key handlers
 Set-PSReadLineKeyHandler -Chord 'Ctrl+SpaceBar' -ScriptBlock { Invoke-WUT-TUI } -ErrorAction SilentlyContinue
 Set-PSReadLineKeyHandler -Chord 'Ctrl+g' -ScriptBlock { Invoke-WUT-WithCurrent } -ErrorAction SilentlyContinue
@@ -208,9 +274,9 @@ Set-PSReadLineKeyHandler -Chord 'Ctrl+g' -ScriptBlock { Invoke-WUT-WithCurrent }
 func detectShells() []string {
 	var shells []string
 
-	candidates := []string{"bash", "zsh", "fish"}
+	candidates := []string{"bash", "zsh", "fish", "pwsh"}
 	if runtime.GOOS == "windows" {
-		candidates = []string{"powershell", "pwsh", "cmd"}
+		candidates = []string{"powershell", "pwsh", "cmd", "bash", "zsh", "fish"}
 	}
 
 	for _, sh := range candidates {

@@ -14,6 +14,7 @@ import (
 
 	"wut/internal/config"
 	"wut/internal/db"
+	"wut/internal/ui"
 )
 
 // dbCmd represents the db command
@@ -101,31 +102,29 @@ func runDBSync(cmd *cobra.Command, args []string) error {
 	// Create sync manager
 	syncManager := db.NewSyncManager(storage)
 
+	_ = os.Setenv("WUT_NO_SPINNER", "true") // Just a placeholder, we use spinner locally below
 	ctx := context.Background()
 	var result *db.SyncResult
 
-	fmt.Println("🔄 Syncing command database...")
-	fmt.Println()
+	err = ui.RunWithSpinner("Syncing command database...", func() error {
+		var syncErr error
+		if dbSyncAll {
+			result, syncErr = syncManager.SyncAll(ctx)
+		} else if len(args) > 0 {
+			result, syncErr = syncManager.SyncCommands(ctx, args)
+		} else {
+			result, syncErr = syncManager.SyncPopular(ctx)
+		}
+		return syncErr
+	})
 
-	// Determine what to sync
-	if dbSyncAll {
-		// Sync all available commands
-		fmt.Println("This may take a while as we're downloading all pages...")
-		result, err = syncManager.SyncAll(ctx)
-	} else if len(args) > 0 {
-		// Sync specific commands
-		result, err = syncManager.SyncCommands(ctx, args)
-	} else {
-		// Sync popular commands
-		result, err = syncManager.SyncPopular(ctx)
-	}
+	fmt.Println()
 
 	if err != nil {
 		return fmt.Errorf("sync failed: %w", err)
 	}
 
 	// Display results
-	fmt.Println()
 	fmt.Println(formatSyncResult(result))
 
 	return nil
@@ -219,8 +218,14 @@ func runDBUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	// Auto sync
-	fmt.Println("🔄 Updating stale pages...")
-	result, err := syncManager.AutoSync(ctx, 7*24*time.Hour)
+	var result *db.SyncResult
+
+	err = ui.RunWithSpinner("Updating stale pages...", func() error {
+		var syncErr error
+		result, syncErr = syncManager.AutoSync(ctx, 7*24*time.Hour)
+		return syncErr
+	})
+
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
 	}

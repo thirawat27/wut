@@ -40,7 +40,38 @@ var (
 `,
 		Version: "", // Will be set in init()
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			return initialize(cmd.Context())
+			if err := initialize(cmd.Context()); err != nil {
+				return err
+			}
+
+			// Commands that are allowed without initialization
+			name := cmd.Name()
+			if name == "init" || name == "help" || name == "version" || name == "bug-report" {
+				return nil
+			}
+
+			// Check if WUT has been initialized
+			if !config.IsInitialized() {
+				fmt.Println()
+				banner := lipgloss.NewStyle().
+					Bold(true).
+					Foreground(lipgloss.Color("#FFFFFF")).
+					Background(lipgloss.Color("#EF4444")).
+					Padding(0, 2).
+					Render("⚠  WUT has not been initialized yet!")
+				fmt.Println(banner)
+				fmt.Println()
+				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF")).Render("  Please run the setup wizard first:"))
+				fmt.Println()
+				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")).Bold(true).Render("    wut init"))
+				fmt.Println()
+				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("  This will configure your settings, install shell integration,"))
+				fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("  and download the command database — all in one step."))
+				fmt.Println()
+				os.Exit(1)
+			}
+
+			return nil
 		},
 		PersistentPostRun: func(cmd *cobra.Command, args []string) {
 			cleanup()
@@ -238,11 +269,7 @@ func setupPremiumHelp(cmd *cobra.Command) {
 
 // SetVersionInfo updates the version string after variables are set
 func SetVersionInfo() {
-	if Commit == "unknown" && BuildTime == "unknown" {
-		rootCmd.Version = Version
-	} else {
-		rootCmd.Version = fmt.Sprintf("%s (commit: %s, built: %s)", Version, Commit, BuildTime)
-	}
+	rootCmd.Version = Version
 }
 
 // initConfig reads in config file and ENV variables if set.
