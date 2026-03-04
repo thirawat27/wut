@@ -52,7 +52,8 @@ func NewStringPool() *StringPool {
 	return &StringPool{
 		pool: sync.Pool{
 			New: func() any {
-				return make([]byte, 0, 256)
+				b := make([]byte, 0, 256)
+				return &b
 			},
 		},
 	}
@@ -60,7 +61,9 @@ func NewStringPool() *StringPool {
 
 // Get retrieves a byte slice from the pool
 func (p *StringPool) Get() []byte {
-	return p.pool.Get().([]byte)[:0]
+	b := p.pool.Get().(*[]byte)
+	ret := (*b)[:0]
+	return ret
 }
 
 // Put returns a byte slice to the pool
@@ -68,6 +71,7 @@ func (p *StringPool) Put(b []byte) {
 	if cap(b) > 4096 { // 4KB
 		return // Let GC collect large slices
 	}
+	b = b[:0]
 	p.pool.Put(&b)
 }
 
@@ -184,7 +188,8 @@ func NewSlicePool[T any](capacity int) *SlicePool[T] {
 	return &SlicePool[T]{
 		pool: sync.Pool{
 			New: func() any {
-				return make([]T, 0, capacity)
+				s := make([]T, 0, capacity)
+				return &s
 			},
 		},
 	}
@@ -192,7 +197,9 @@ func NewSlicePool[T any](capacity int) *SlicePool[T] {
 
 // Get retrieves a slice from the pool
 func (p *SlicePool[T]) Get() []T {
-	return p.pool.Get().([]T)[:0]
+	s := p.pool.Get().(*[]T)
+	ret := (*s)[:0]
+	return ret
 }
 
 // Put returns a slice to the pool

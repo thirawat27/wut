@@ -143,19 +143,17 @@ func runFix(cmd *cobra.Command, args []string) error {
 // Heuristic: it contains ≥ 2 "natural" words AND the first word is NOT a
 // known root command.
 func looksLikeNaturalLanguage(input string) bool {
-	naturalTriggers := []string{
-		"how", "list", "show", "what", "find", "get", "display",
-		"where", "which", "delete", "remove", "stop", "restart",
-		"enter", "open", "create", "check", "view", "search",
-		"compress", "extract", "kill", "count", "run", "build",
-		"print", "clean", "logs",
-	}
-	words := strings.Fields(strings.ToLower(input))
-	if len(words) < 2 {
-		return false
+	// Use a set for O(1) lookups instead of O(n) slice scans
+	naturalTriggers := map[string]bool{
+		"how": true, "list": true, "show": true, "what": true,
+		"find": true, "get": true, "display": true, "where": true,
+		"which": true, "delete": true, "remove": true, "stop": true,
+		"restart": true, "enter": true, "open": true, "create": true,
+		"check": true, "view": true, "search": true, "compress": true,
+		"extract": true, "kill": true, "count": true, "run": true,
+		"build": true, "print": true, "clean": true, "logs": true,
 	}
 
-	// If first word is a known command, it's a shell command
 	knownCommands := map[string]bool{
 		"git": true, "docker": true, "kubectl": true, "npm": true,
 		"go": true, "python": true, "pip": true, "curl": true,
@@ -165,16 +163,21 @@ func looksLikeNaturalLanguage(input string) bool {
 		"terraform": true, "aws": true, "gcloud": true, "helm": true,
 		"wut": true,
 	}
+
+	words := strings.Fields(strings.ToLower(input))
+	if len(words) < 2 {
+		return false
+	}
+
+	// If first word is a known command, it's a shell command
 	if knownCommands[words[0]] {
 		return false
 	}
 
-	// Check if any natural trigger word is present
+	// O(1) lookup per word instead of O(n) inner loop
 	for _, w := range words {
-		for _, t := range naturalTriggers {
-			if w == t {
-				return true
-			}
+		if naturalTriggers[w] {
+			return true
 		}
 	}
 	return false

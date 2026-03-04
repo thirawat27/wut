@@ -425,11 +425,11 @@ func searchHistoryOptimized(storage *db.Storage, query string, limit int) ([]db.
 }
 
 func getTotalCount(ctx context.Context, storage *db.Storage) int {
-	entries, err := storage.GetHistory(ctx, 0)
+	stats, err := storage.GetHistoryStats(ctx)
 	if err != nil {
 		return 0
 	}
-	return len(entries)
+	return stats.TotalExecutions
 }
 
 func showHistoryStats(ctx context.Context, storage *db.Storage) error {

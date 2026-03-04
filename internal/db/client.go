@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -32,7 +33,7 @@ type Client struct {
 	baseURL       string
 	language      string
 	storage       *Storage
-	offlineMode   bool
+	offlineMode   atomic.Bool // atomic to prevent data races across goroutines
 	autoDetect    bool
 	cacheInMemory bool
 	memoryCache   map[string]*Page
@@ -71,7 +72,7 @@ func WithStorage(storage *Storage) ClientOption {
 // WithOfflineMode enables offline-only mode
 func WithOfflineMode(offline bool) ClientOption {
 	return func(c *Client) {
-		c.offlineMode = offline
+		c.offlineMode.Store(offline)
 	}
 }
 
@@ -106,11 +107,11 @@ func NewClient(opts ...ClientOption) *Client {
 		},
 		baseURL:       baseRawURL,
 		language:      lang,
-		offlineMode:   false,
 		autoDetect:    true,
 		cacheInMemory: true,
 		memoryCache:   make(map[string]*Page),
 	}
+	c.offlineMode.Store(false)
 
 	for _, opt := range opts {
 		opt(c)
@@ -131,7 +132,7 @@ func (c *Client) SetStorage(storage *Storage) {
 
 // SetOfflineMode enables or disables offline-only mode
 func (c *Client) SetOfflineMode(offline bool) {
-	c.offlineMode = offline
+	c.offlineMode.Store(offline)
 }
 
 // SetAutoDetect enables or disables auto-detection
@@ -141,12 +142,12 @@ func (c *Client) SetAutoDetect(auto bool) {
 
 // IsOfflineMode returns true if client is in offline mode
 func (c *Client) IsOfflineMode() bool {
-	return c.offlineMode
+	return c.offlineMode.Load()
 }
 
 // IsOnline checks if the client can connect to the internet
 func (c *Client) IsOnline(ctx context.Context) bool {
-	if c.offlineMode {
+	if c.offlineMode.Load() {
 		return false
 	}
 
@@ -203,7 +204,7 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 	}
 
 	// If offline mode, don't try remote
-	if c.offlineMode {
+	if c.offlineMode.Load() {
 		return nil, fmt.Errorf("page not found in local storage (offline mode): %s/%s", platform, command)
 	}
 
@@ -229,7 +230,7 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 	if err != nil {
 		// Network error - auto fall back to offline mode if autoDetect is enabled
 		if c.autoDetect {
-			c.offlineMode = true
+			c.offlineMode.Store(true)
 			return nil, fmt.Errorf("offline mode: page not found in local storage: %s/%s (use 'wut db sync' to download)", platform, command)
 		}
 		return nil, err
@@ -256,7 +257,7 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 // SearchPages searches for TLDR pages across all platforms
 func (c *Client) SearchPages(ctx context.Context, query string) ([]Page, error) {
 	// Try local storage first if offline mode or auto-detect
-	if c.offlineMode || (c.autoDetect && !c.IsOnline(ctx)) {
+	if c.offlineMode.Load() || (c.autoDetect && !c.IsOnline(ctx)) {
 		if c.storage != nil {
 			storedPages, err := c.storage.SearchLocal(query)
 			if err == nil && len(storedPages) > 0 {
@@ -336,7 +337,7 @@ func (c *Client) GetPageAnyPlatform(ctx context.Context, command string) (*Page,
 	}
 
 	// If offline mode, don't try remote
-	if c.offlineMode {
+	if c.offlineMode.Load() {
 		return nil, fmt.Errorf("page not found in local storage (offline mode): %s", command)
 	}
 
@@ -362,7 +363,7 @@ func (c *Client) GetPageAnyPlatform(ctx context.Context, command string) (*Page,
 
 	// If all failed and autoDetect is enabled, switch to offline mode
 	if c.autoDetect {
-		c.offlineMode = true
+		c.offlineMode.Store(true)
 	}
 
 	return nil, fmt.Errorf("page not found for command: %s", command)

@@ -39,17 +39,18 @@ func FastToLower(s string) string {
 		return s
 	}
 
-	// Convert to lowercase
+	// Convert to lowercase — release the pooled slice only AFTER string(b) has
+	// copied its bytes, so the pool cannot reuse the slice too early.
 	b := AcquireByteSlice()
-	defer ReleaseByteSlice(b)
-
 	b = append(b[:0], s...)
 	for i := 0; i < len(b); i++ {
 		if b[i] >= 'A' && b[i] <= 'Z' {
 			b[i] += 'a' - 'A'
 		}
 	}
-	return string(b)
+	result := string(b) // copy bytes into new string
+	ReleaseByteSlice(b) // safe to release now
+	return result
 }
 
 // FastToUpper converts string to uppercase without allocation for ASCII
@@ -66,15 +67,15 @@ func FastToUpper(s string) string {
 	}
 
 	b := AcquireByteSlice()
-	defer ReleaseByteSlice(b)
-
 	b = append(b[:0], s...)
 	for i := 0; i < len(b); i++ {
 		if b[i] >= 'a' && b[i] <= 'z' {
 			b[i] -= 'a' - 'A'
 		}
 	}
-	return string(b)
+	result := string(b) // copy bytes into new string
+	ReleaseByteSlice(b) // safe to release now
+	return result
 }
 
 // FastContains checks if substring exists without allocation

@@ -77,6 +77,7 @@ func NewWorkerPool(workers, queueSize int) *WorkerPool {
 	}, ants.WithMaxBlockingTasks(queueSize), ants.WithNonblocking(false))
 
 	p.pool = pool
+	p.active.Store(true) // pool is ready immediately after creation
 	return p
 }
 
@@ -364,44 +365,47 @@ func (p *PriorityPool) SubmitLow(task Task) bool {
 	}
 }
 
-// worker processes tasks by priority
+// worker processes tasks by priority.
+// Priority order: high → medium → low.
+// Drains higher-priority queues before falling through to lower ones.
+// Blocks on the innermost select to avoid CPU busy-looping when all queues are empty.
 func (p *PriorityPool) worker() {
 	defer p.wg.Done()
 
 	for {
+		// 1st pass: drain high-priority queue (non-blocking)
 		select {
 		case <-p.ctx.Done():
 			return
-
 		case task := <-p.highPriority:
 			_ = task.Execute(p.ctx)
-
+			continue
 		default:
-			select {
-			case <-p.ctx.Done():
-				return
+		}
 
-			case task := <-p.highPriority:
-				_ = task.Execute(p.ctx)
+		// 2nd pass: high still takes precedence over medium (non-blocking)
+		select {
+		case <-p.ctx.Done():
+			return
+		case task := <-p.highPriority:
+			_ = task.Execute(p.ctx)
+			continue
+		case task := <-p.mediumPriority:
+			_ = task.Execute(p.ctx)
+			continue
+		default:
+		}
 
-			case task := <-p.mediumPriority:
-				_ = task.Execute(p.ctx)
-
-			default:
-				select {
-				case <-p.ctx.Done():
-					return
-
-				case task := <-p.highPriority:
-					_ = task.Execute(p.ctx)
-
-				case task := <-p.mediumPriority:
-					_ = task.Execute(p.ctx)
-
-				case task := <-p.lowPriority:
-					_ = task.Execute(p.ctx)
-				}
-			}
+		// 3rd pass: block and wait for any task (prevents busy-loop)
+		select {
+		case <-p.ctx.Done():
+			return
+		case task := <-p.highPriority:
+			_ = task.Execute(p.ctx)
+		case task := <-p.mediumPriority:
+			_ = task.Execute(p.ctx)
+		case task := <-p.lowPriority:
+			_ = task.Execute(p.ctx)
 		}
 	}
 }
@@ -553,13 +557,15 @@ func NewRateLimiter(rate int, interval time.Duration) *RateLimiter {
 func (rl *RateLimiter) Allow() bool {
 	now := time.Now().UnixNano()
 	last := rl.lastRefill.Load()
-	elapsed := now - last
 
-	if elapsed > rl.interval.Nanoseconds() {
-		// Refill tokens
+	if now-last > rl.interval.Nanoseconds() {
+		// Only one goroutine wins the CAS; only it refills the bucket.
+		// This prevents a thundering-herd of goroutines all adding maxTokens.
 		if rl.lastRefill.CompareAndSwap(last, now) {
 			rl.tokens.Store(rl.maxTokens)
 		}
+		// Losers fall through and try to consume a token normally;
+		// the winner already stored maxTokens so they will succeed.
 	}
 
 	for {

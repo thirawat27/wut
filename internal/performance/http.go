@@ -161,7 +161,8 @@ func NewResponseBufferPool(size int) *ResponseBufferPool {
 	return &ResponseBufferPool{
 		pool: sync.Pool{
 			New: func() any {
-				return make([]byte, size)
+				b := make([]byte, size)
+				return &b
 			},
 		},
 	}
@@ -169,7 +170,8 @@ func NewResponseBufferPool(size int) *ResponseBufferPool {
 
 // Get retrieves a buffer from the pool
 func (p *ResponseBufferPool) Get() []byte {
-	return p.pool.Get().([]byte)
+	b := p.pool.Get().(*[]byte)
+	return *b
 }
 
 // Put returns a buffer to the pool

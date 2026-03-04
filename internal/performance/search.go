@@ -147,7 +147,7 @@ func (idx *InvertedIndex) Search(query string, limit int) []SearchResult {
 			// Normalize score by document length
 			normalizedScore := score / float64(len(doc.Tokens)) * float64(len(queryTokens))
 			results = append(results, SearchResult{
-				ID:      string(rune(id)),
+				ID:      fmt.Sprintf("%d", id), // use decimal string, not Unicode rune
 				Score:   normalizedScore,
 				Data:    doc.Data,
 				Matched: true,

@@ -22,13 +22,14 @@ const (
 
 // OptimizedStorage provides high-performance storage with batching and caching
 type OptimizedStorage struct {
-	db          *bbolt.DB
-	path        string
-	writeQueue  chan *writeOp
-	readCache   *LRUCache[string, []byte]
-	batchConfig BatchConfig
-	stats       StorageStats
-	closed      atomic.Bool
+	db                 *bbolt.DB
+	path               string
+	writeQueue         chan *writeOp
+	readCache          *LRUCache[string, []byte]
+	batchConfig        BatchConfig
+	stats              StorageStats
+	closed             atomic.Bool
+	batchProcessorDone chan struct{} // signals when batchProcessor goroutine exits
 }
 
 // BatchConfig holds batch processing configuration
@@ -82,16 +83,20 @@ func NewOptimizedStorageWithConfig(dbPath string, config BatchConfig) (*Optimize
 	}
 
 	s := &OptimizedStorage{
-		db:          db,
-		path:        dbPath,
-		writeQueue:  make(chan *writeOp, config.MaxSize*2),
-		readCache:   NewLRUCache[string, []byte](10000, 32),
-		batchConfig: config,
+		db:                 db,
+		path:               dbPath,
+		writeQueue:         make(chan *writeOp, config.MaxSize*2),
+		readCache:          NewLRUCache[string, []byte](10000, 32),
+		batchConfig:        config,
+		batchProcessorDone: make(chan struct{}),
 	}
 
 	// Start batch processor
 	if config.Enabled {
 		go s.batchProcessor()
+	} else {
+		// No batch processor, close done channel immediately
+		close(s.batchProcessorDone)
 	}
 
 	return s, nil
@@ -99,6 +104,8 @@ func NewOptimizedStorageWithConfig(dbPath string, config BatchConfig) (*Optimize
 
 // batchProcessor processes write operations in batches
 func (s *OptimizedStorage) batchProcessor() {
+	defer close(s.batchProcessorDone) // signal Close() that we have exited
+
 	ticker := time.NewTicker(s.batchConfig.Timeout)
 	defer ticker.Stop()
 
@@ -108,7 +115,7 @@ func (s *OptimizedStorage) batchProcessor() {
 		select {
 		case op, ok := <-s.writeQueue:
 			if !ok {
-				// Process remaining batch
+				// Channel closed — flush remaining and exit
 				if len(batch) > 0 {
 					s.flushBatch(batch)
 				}
@@ -417,11 +424,11 @@ func (s *OptimizedStorage) CacheStats() (hits, misses uint64) {
 func (s *OptimizedStorage) Close() error {
 	s.closed.Store(true)
 
-	// Close write queue
+	// Close write queue; batchProcessor will drain and exit
 	close(s.writeQueue)
 
-	// Wait for batch processor to finish
-	time.Sleep(100 * time.Millisecond)
+	// Wait for batchProcessor to finish flushing (reliable, no arbitrary sleep)
+	<-s.batchProcessorDone
 
 	return s.db.Close()
 }

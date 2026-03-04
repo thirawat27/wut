@@ -39,7 +39,9 @@ func Benchmark(name string, duration time.Duration, fn func()) BenchmarkResult {
 	var m1 runtime.MemStats
 	runtime.ReadMemStats(&m1)
 
-	// Run benchmark
+	// Run benchmark — use a done channel instead of busy-loop default:
+	// a bare `select { default: fn() }` spins the goroutine at 100% CPU
+	// even while time.Sleep(duration) is blocking in the caller.
 	done := make(chan struct{})
 	go func() {
 		for {
@@ -47,9 +49,9 @@ func Benchmark(name string, duration time.Duration, fn func()) BenchmarkResult {
 			case <-done:
 				return
 			default:
-				fn()
-				ops.Add(1)
 			}
+			fn()
+			ops.Add(1)
 		}
 	}()
 
@@ -62,7 +64,10 @@ func Benchmark(name string, duration time.Duration, fn func()) BenchmarkResult {
 	allocs = m2.Mallocs - m1.Mallocs
 
 	opCount := ops.Load()
-	avgLatency := time.Duration(int64(duration) / int64(opCount))
+	var avgLatency time.Duration
+	if opCount > 0 {
+		avgLatency = time.Duration(int64(duration) / int64(opCount))
+	}
 	throughput := float64(opCount) / duration.Seconds()
 
 	return BenchmarkResult{
@@ -98,9 +103,9 @@ func BenchmarkParallel(name string, duration time.Duration, workers int, fn func
 				case <-done:
 					return
 				default:
-					fn()
-					ops.Add(1)
 				}
+				fn()
+				ops.Add(1)
 			}
 		})
 	}
@@ -110,7 +115,10 @@ func BenchmarkParallel(name string, duration time.Duration, workers int, fn func
 	wg.Wait()
 
 	opCount := ops.Load()
-	avgLatency := time.Duration(int64(duration) / int64(opCount))
+	var avgLatency time.Duration
+	if opCount > 0 {
+		avgLatency = time.Duration(int64(duration) / int64(opCount))
+	}
 	throughput := float64(opCount) / duration.Seconds()
 
 	return BenchmarkResult{

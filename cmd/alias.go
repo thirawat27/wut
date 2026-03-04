@@ -48,7 +48,7 @@ func init() {
 	aliasCmd.Flags().StringVarP(&aliasCommand, "command", "c", "", "alias command")
 	aliasCmd.Flags().StringVar(&aliasDesc, "description", "", "alias description")
 	aliasCmd.Flags().BoolVarP(&aliasGenerate, "generate", "g", false, "generate smart aliases for current project")
-	aliasCmd.Flags().BoolVarP(&aliasApply, "apply", "", false, "apply aliases to shell config")
+	aliasCmd.Flags().BoolVar(&aliasApply, "apply", false, "apply aliases to shell config")
 	aliasCmd.Flags().StringVarP(&aliasShell, "shell", "s", "", "shell type (bash, zsh, fish)")
 }
 

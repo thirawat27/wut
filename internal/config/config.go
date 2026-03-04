@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/spf13/viper"
@@ -123,6 +124,8 @@ type TLDRConfig struct {
 var (
 	// globalConfig holds the global configuration instance
 	globalConfig *Config
+	// configMu guards concurrent access to globalConfig
+	configMu sync.RWMutex
 	// configPath is the path to the config file
 	configPath string
 )
@@ -175,27 +178,35 @@ func Load(path string) (*Config, error) {
 	// Expand paths
 	expandPaths(&cfg)
 
+	configMu.Lock()
 	globalConfig = &cfg
+	configMu.Unlock()
 	return &cfg, nil
 }
 
 // Get returns the global configuration instance
 func Get() *Config {
-	if globalConfig == nil {
+	configMu.RLock()
+	cfg := globalConfig
+	configMu.RUnlock()
+
+	if cfg == nil {
 		// Load default config if not already loaded
-		cfg, err := Load("")
+		loaded, err := Load("")
 		if err != nil {
 			// Return default config on error
 			return &Config{}
 		}
-		return cfg
+		return loaded
 	}
-	return globalConfig
+	return cfg
 }
 
 // Set updates the global configuration
 func Set(cfg *Config) {
+	configMu.Lock()
 	globalConfig = cfg
+	configMu.Unlock()
 }
 
 // Save saves the current configuration to file
@@ -227,7 +238,7 @@ func Save() error {
 // setDefaults sets default configuration values
 func setDefaults() {
 	viper.SetDefault("app.name", "wut")
-	viper.SetDefault("app.version", "1.0.0")
+	viper.SetDefault("app.version", "0.2.0")
 	viper.SetDefault("app.debug", false)
 	viper.SetDefault("app.initialized", false)
 

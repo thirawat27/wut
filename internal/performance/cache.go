@@ -395,12 +395,9 @@ func (c *StatsCache[K, V]) Get(key K) (V, bool) {
 
 // Stats returns cache statistics
 func (c *StatsCache[K, V]) Stats() *CacheStats {
-	return &CacheStats{
-		Hits:      atomic.Uint64{}, // Use zero value, caller should use HitRate()
-		Misses:    atomic.Uint64{},
-		Evictions: atomic.Uint64{},
-		Size:      c.Len(),
-	}
+	// Return a pointer to the live stats struct so callers can read
+	// Hits/Misses that are incremented atomically by Get().
+	return &c.stats
 }
 
 // GetHits returns the number of cache hits

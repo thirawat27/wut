@@ -174,10 +174,10 @@ func runUndo(cmd *cobra.Command, args []string) error {
 			history, err := store.GetHistory(context.Background(), 10)
 			if err == nil && len(history) > 0 {
 				for _, entry := range history {
-					c := strings.TrimSpace(entry.Command)
+					entryCmd := strings.TrimSpace(entry.Command)
 					// Skip any wut commands in the history
-					if c != "" && !strings.HasPrefix(c, "wut") {
-						targetCmd = c
+					if entryCmd != "" && !strings.HasPrefix(entryCmd, "wut") {
+						targetCmd = entryCmd
 						break
 					}
 				}

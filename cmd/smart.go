@@ -149,7 +149,11 @@ func runSmart(cmd *cobra.Command, args []string) error {
 			suggestErr = err
 			return
 		}
-		suggestionsCh <- sugs
+		// Use select so the goroutine exits even if the caller already timed out.
+		select {
+		case suggestionsCh <- sugs:
+		case <-ctx.Done():
+		}
 	}()
 
 	var suggestions []smart.Suggestion
