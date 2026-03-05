@@ -8,7 +8,7 @@
     One-line install: irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 
 .PARAMETER Version
-    Install specific version tag (e.g. v0.1.0). Default: latest
+    Install specific version tag (e.g. v0.2.0). Default: latest
 
 .PARAMETER Force
     Skip confirmation prompt if WUT is already installed.
@@ -25,7 +25,7 @@
 
 .EXAMPLE
     # Install specific version
-    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1))) -Version "v0.1.0"
+    & ([scriptblock]::Create((irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1))) -Version "v0.2.0"
 
 .EXAMPLE
     # Uninstall
@@ -90,7 +90,7 @@ Examples:
     irm https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.ps1 | iex
 
     # Specific version
-    & ([scriptblock]::Create((irm .../install.ps1))) -Version "v0.1.0"
+    & ([scriptblock]::Create((irm .../install.ps1))) -Version "v0.2.0"
 
     # Uninstall
     & ([scriptblock]::Create((irm .../install.ps1))) -Uninstall

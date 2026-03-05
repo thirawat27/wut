@@ -65,7 +65,7 @@ Examples:
     curl -fsSL .../install.sh | bash
 
     # Specific version
-    curl -fsSL .../install.sh | bash -s -- --version v0.1.0
+    curl -fsSL .../install.sh | bash -s -- --version v0.2.0
 
     # Uninstall
     curl -fsSL .../install.sh | bash -s -- --uninstall
