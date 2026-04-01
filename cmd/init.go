@@ -320,10 +320,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 					printOK("Documentation is now offline")
 				}
 			} else {
-				printOK("Skipped — run 'wut tldr sync' to execute later")
+				printOK("Skipped — run 'wut db sync' to execute later")
 			}
 		} else {
-			fmt.Println("Download TLDR pages: wut tldr sync")
+			fmt.Println("Download TLDR pages: wut db sync")
 		}
 	}
 

@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"wut/internal/config"
@@ -160,14 +159,7 @@ func runUndo(cmd *cobra.Command, args []string) error {
 		targetCmd = strings.Join(args, " ")
 	} else {
 		// 2. Otherwise, fetch the last executed command from DB history
-		cfg := config.Get()
-		dbPath := cfg.Database.Path
-		if dbPath == "" {
-			home, _ := os.UserHomeDir()
-			dbPath = home + "/.config/wut/wut.db"
-		}
-
-		store, err := db.NewStorage(dbPath)
+		store, err := db.NewStorage(config.GetDatabasePath())
 		if err == nil {
 			defer store.Close()
 			// Fetch a bit more just in case the latest are 'wut' commands

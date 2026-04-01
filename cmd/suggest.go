@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -248,12 +247,5 @@ func runCommandMode(client *db.Client, query string, cfg *config.Config) error {
 
 // getDBPathForSuggest returns the path to the database
 func getDBPathForSuggest() string {
-	cfg := config.Get()
-	if cfg.Database.Path != "" {
-		return filepath.Join(filepath.Dir(cfg.Database.Path), "tldr.db")
-	}
-
-	// Default path
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "wut", "tldr.db")
+	return config.GetTLDRDatabasePath()
 }

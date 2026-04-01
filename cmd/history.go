@@ -64,8 +64,7 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	ctx := cmd.Context()
 	log := logger.With("history")
 
-	cfg := config.Get()
-	storage, err := db.NewStorage(cfg.Database.Path)
+	storage, err := db.NewStorage(config.GetDatabasePath())
 	if err != nil {
 		log.Error("failed to initialize storage", "error", err)
 		return fmt.Errorf("failed to initialize storage: %w", err)

@@ -91,10 +91,79 @@ func (sm *SyncManager) SyncAll(ctx context.Context) (*SyncResult, error) {
 	return sm.SyncFromZip(ctx, zipURL)
 }
 
+type batchPageSaver struct {
+	storage   *Storage
+	log       *logger.Logger
+	batch     []*Page
+	batchSize int
+	parsed    int
+	saved     int
+	failed    int
+	errors    []error
+}
+
+func newBatchPageSaver(storage *Storage, log *logger.Logger, batchSize int) *batchPageSaver {
+	if batchSize <= 0 {
+		batchSize = 500
+	}
+	return &batchPageSaver{
+		storage:   storage,
+		log:       log,
+		batchSize: batchSize,
+		batch:     make([]*Page, 0, batchSize),
+	}
+}
+
+func (s *batchPageSaver) Add(page *Page) {
+	if page == nil {
+		return
+	}
+
+	s.parsed++
+	s.batch = append(s.batch, page)
+	if len(s.batch) >= s.batchSize {
+		s.flush()
+	}
+}
+
+func (s *batchPageSaver) AddFailure(err error) {
+	if err == nil {
+		return
+	}
+	s.failed++
+	s.errors = append(s.errors, err)
+}
+
+func (s *batchPageSaver) flush() {
+	if len(s.batch) == 0 {
+		return
+	}
+
+	if err := s.storage.SavePages(s.batch); err != nil {
+		s.failed += len(s.batch)
+		s.errors = append(s.errors, fmt.Errorf("failed to save batch of %d pages: %w", len(s.batch), err))
+		s.log.Warn("batch save failed", "size", len(s.batch), "error", err)
+	} else {
+		s.saved += len(s.batch)
+	}
+
+	s.batch = s.batch[:0]
+}
+
+func (s *batchPageSaver) Result(start time.Time) *SyncResult {
+	s.flush()
+	return &SyncResult{
+		Downloaded: s.saved,
+		Failed:     s.failed,
+		Errors:     s.errors,
+		Duration:   time.Since(start),
+	}
+}
+
 // SyncFromLocalDir reads an extracted tldr-pages archive directory
 func (sm *SyncManager) SyncFromLocalDir(ctx context.Context, pagesDir string) (*SyncResult, error) {
 	start := time.Now()
-	var pages []*Page
+	saver := newBatchPageSaver(sm.storage, sm.log, 500)
 
 	sm.log.Info("reading local pages directory", "dir", pagesDir)
 
@@ -131,12 +200,14 @@ func (sm *SyncManager) SyncFromLocalDir(ctx context.Context, pagesDir string) (*
 
 		content, err := os.ReadFile(path)
 		if err != nil {
+			readErr := fmt.Errorf("failed to read local page %s: %w", path, err)
+			saver.AddFailure(readErr)
 			sm.log.Warn("failed to read local page", "file", path, "error", err)
 			return nil
 		}
 
 		page := sm.client.parsePage(string(content), command, platform, language)
-		pages = append(pages, page)
+		saver.Add(page)
 		return nil
 	})
 
@@ -144,7 +215,8 @@ func (sm *SyncManager) SyncFromLocalDir(ctx context.Context, pagesDir string) (*
 		return nil, fmt.Errorf("failed walking local pages dir: %w", err)
 	}
 
-	return sm.saveBatchPages(pages, start)
+	sm.log.Info("parsed pages from source", "count", saver.parsed)
+	return sm.finishBatchSync(saver.Result(start))
 }
 
 // SyncFromZip downloads the full TLDR database archive and imports it
@@ -188,7 +260,7 @@ func (sm *SyncManager) SyncFromZip(ctx context.Context, zipURL string) (*SyncRes
 	}
 	defer zipReader.Close()
 
-	var pages []*Page
+	saver := newBatchPageSaver(sm.storage, sm.log, 500)
 
 	for _, f := range zipReader.File {
 		// Only parse .md files
@@ -217,6 +289,7 @@ func (sm *SyncManager) SyncFromZip(ctx context.Context, zipURL string) (*SyncRes
 
 		rc, err := f.Open()
 		if err != nil {
+			saver.AddFailure(fmt.Errorf("failed to open file in zip %s: %w", f.Name, err))
 			sm.log.Warn("failed to open file in zip", "file", f.Name, "error", err)
 			continue
 		}
@@ -225,50 +298,24 @@ func (sm *SyncManager) SyncFromZip(ctx context.Context, zipURL string) (*SyncRes
 		rc.Close()
 
 		if err != nil {
+			saver.AddFailure(fmt.Errorf("failed to read file in zip %s: %w", f.Name, err))
 			sm.log.Warn("failed to read file in zip", "file", f.Name, "error", err)
 			continue
 		}
 
 		page := sm.client.parsePage(string(contentBytes), command, platform, language)
-		pages = append(pages, page)
+		saver.Add(page)
 	}
 
-	return sm.saveBatchPages(pages, start)
+	sm.log.Info("parsed pages from source", "count", saver.parsed)
+	return sm.finishBatchSync(saver.Result(start))
 }
 
-func (sm *SyncManager) saveBatchPages(pages []*Page, start time.Time) (*SyncResult, error) {
-	sm.log.Info("parsed pages from source", "count", len(pages))
-
-	batchSize := 500
-	var savedCount int
-	var errors []error
-
-	for i := 0; i < len(pages); i += batchSize {
-		end := i + batchSize
-		if end > len(pages) {
-			end = len(pages)
-		}
-
-		batch := pages[i:end]
-		if err := sm.storage.SavePages(batch); err != nil {
-			errors = append(errors, fmt.Errorf("failed to save batch [%d:%d]: %w", i, end, err))
-			sm.log.Warn("batch save failed", "error", err)
-		} else {
-			savedCount += len(batch)
-		}
-	}
-
-	result := &SyncResult{
-		Downloaded: savedCount,
-		Failed:     len(pages) - savedCount,
-		Errors:     errors,
-		Duration:   time.Since(start),
-	}
-
+func (sm *SyncManager) finishBatchSync(result *SyncResult) (*SyncResult, error) {
 	// Update metadata
 	meta := &Metadata{
 		LastSync:   time.Now(),
-		TotalPages: savedCount,
+		TotalPages: result.Downloaded,
 		Platforms:  []string{PlatformCommon, PlatformLinux, PlatformMacOS, PlatformWindows, PlatformAndroid, PlatformFreeBSD, PlatformNetBSD, PlatformOpenBSD, PlatformSunOS},
 	}
 	if err := sm.storage.SaveMetadata(meta); err != nil {

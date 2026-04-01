@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"wut/internal/config"
@@ -57,13 +56,7 @@ func init() {
 }
 
 func getDB() (*db.Storage, error) {
-	cfg := config.Get()
-	dbPath := cfg.Database.Path
-	if dbPath == "" {
-		home, _ := os.UserHomeDir()
-		dbPath = home + "/.config/wut/wut.db"
-	}
-	return db.NewStorage(dbPath)
+	return db.NewStorage(config.GetDatabasePath())
 }
 
 func runBookmarkAdd(cmd *cobra.Command, args []string) error {

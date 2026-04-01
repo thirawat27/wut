@@ -3,7 +3,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -42,14 +41,7 @@ func init() {
 
 func runFix(cmd *cobra.Command, args []string) error {
 	// 1. Setup storage and corrector
-	cfg := config.Get()
-	dbPath := cfg.Database.Path
-	if dbPath == "" {
-		home, _ := os.UserHomeDir()
-		dbPath = home + "/.config/wut/wut.db"
-	}
-
-	store, err := db.NewStorage(dbPath)
+	store, err := db.NewStorage(config.GetDatabasePath())
 	if err != nil {
 		return fmt.Errorf("failed to open database: %w", err)
 	}

@@ -31,7 +31,7 @@ var tipCmd = &cobra.Command{
 			return nil
 		}
 
-		storage, err := db.NewStorage(cfg.Database.Path)
+		storage, err := db.NewStorage(config.GetDatabasePath())
 		if err != nil {
 			return nil
 		}

@@ -629,14 +629,14 @@ func (m *Model) loadInitialSuggestions() tea.Cmd {
 	return func() tea.Msg {
 		// Try local storage first
 		if m.storage != nil {
-			storedPages, err := m.storage.GetAllPages()
-			if err == nil && len(storedPages) > 0 {
-				pages := make([]Page, len(storedPages))
-				for i, sp := range storedPages {
+			commands, err := m.storage.ListCommands(0)
+			if err == nil && len(commands) > 0 {
+				pages := make([]Page, len(commands))
+				for i, command := range commands {
 					pages[i] = Page{
-						Name:        sp.Name,
-						Platform:    sp.Platform,
-						Description: sp.Description,
+						Name:        command,
+						Description: fmt.Sprintf("View documentation for '%s'", command),
+						Platform:    "common",
 					}
 				}
 				return searchResultsMsg{pages: pages}
@@ -669,32 +669,67 @@ func (m *Model) searchCommand(query string) tea.Cmd {
 
 	return func() tea.Msg {
 		ctx := context.Background()
-		page, err := m.client.GetPageAnyPlatform(ctx, query)
 
-		if err != nil {
-			// Try to get from common commands
-			commands, _ := m.client.GetAvailableCommands(ctx)
-			var pages []Page
-			queryLower := strings.ToLower(query)
+		if m.storage != nil {
+			commands, err := m.storage.ListCommands(0)
+			if err == nil && len(commands) > 0 {
+				var pages []Page
+				queryLower := strings.ToLower(query)
 
-			for _, cmd := range commands {
-				if strings.Contains(strings.ToLower(cmd), queryLower) {
-					pages = append(pages, Page{
-						Name:        cmd,
-						Description: fmt.Sprintf("View documentation for '%s'", cmd),
-						Platform:    "common",
-					})
+				for _, command := range commands {
+					if strings.Contains(strings.ToLower(command), queryLower) {
+						pages = append(pages, Page{
+							Name:        command,
+							Description: fmt.Sprintf("View documentation for '%s'", command),
+							Platform:    "common",
+						})
+						if len(pages) >= 50 {
+							break
+						}
+					}
+				}
+
+				if len(pages) > 0 {
+					return searchResultsMsg{pages: pages}
 				}
 			}
 
-			if len(pages) == 0 {
-				return searchResultsMsg{err: fmt.Errorf("command not found: %s", query)}
+			storedPages, err := m.storage.SearchLocalLimited(query, 50)
+			if err == nil && len(storedPages) > 0 {
+				pages := make([]Page, len(storedPages))
+				for i, sp := range storedPages {
+					pages[i] = Page{
+						Name:        sp.Name,
+						Platform:    sp.Platform,
+						Description: sp.Description,
+					}
+				}
+				return searchResultsMsg{pages: pages}
 			}
-
-			return searchResultsMsg{pages: pages}
 		}
 
-		return searchResultsMsg{pages: []Page{*page}}
+		commands, _ := m.client.GetAvailableCommands(ctx)
+		var pages []Page
+		queryLower := strings.ToLower(query)
+
+		for _, cmd := range commands {
+			if strings.Contains(strings.ToLower(cmd), queryLower) {
+				pages = append(pages, Page{
+					Name:        cmd,
+					Description: fmt.Sprintf("View documentation for '%s'", cmd),
+					Platform:    "common",
+				})
+				if len(pages) >= 50 {
+					break
+				}
+			}
+		}
+
+		if len(pages) == 0 {
+			return searchResultsMsg{err: fmt.Errorf("command not found: %s", query)}
+		}
+
+		return searchResultsMsg{pages: pages}
 	}
 }
 

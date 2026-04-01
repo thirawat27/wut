@@ -29,8 +29,9 @@ var (
 	// Commit is set during build
 	Commit = "unknown"
 
-	cfgFile string
-	debug   bool
+	cfgFile       string
+	debug         bool
+	didInitialize bool
 
 	// rootCmd represents the base command
 	rootCmd = &cobra.Command{
@@ -40,14 +41,12 @@ var (
 `,
 		Version: "", // Will be set in init()
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-			if err := initialize(cmd.Context()); err != nil {
-				return err
+			if shouldSkipInitialization(cmd) {
+				return nil
 			}
 
-			// Commands that are allowed without initialization
-			name := cmd.Name()
-			if name == "init" || name == "help" || name == "version" || name == "bug-report" {
-				return nil
+			if err := initialize(cmd.Context()); err != nil {
+				return err
 			}
 
 			// Check if WUT has been initialized
@@ -84,6 +83,23 @@ func applyPremiumHelpRecursively(c *cobra.Command) {
 	setupPremiumHelp(c)
 	for _, sub := range c.Commands() {
 		applyPremiumHelpRecursively(sub)
+	}
+}
+
+func shouldSkipInitialization(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+
+	if help, err := cmd.Flags().GetBool("help"); err == nil && help {
+		return true
+	}
+
+	switch cmd.Name() {
+	case "init", "help", "version", "bug-report":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -279,6 +295,8 @@ func initConfig() {
 
 // initialize performs initialization before command execution
 func initialize(ctx context.Context) error {
+	didInitialize = false
+
 	// Initialize logger first
 	logCfg := logger.DefaultConfig()
 	if debug {
@@ -323,11 +341,17 @@ func initialize(ctx context.Context) error {
 		"debug", cfg.App.Debug,
 	)
 
+	didInitialize = true
 	return nil
 }
 
 // cleanup performs cleanup after command execution
 func cleanup() {
+	if !didInitialize {
+		return
+	}
+	didInitialize = false
+
 	log := logger.With("cleanup")
 	log.Info("performing cleanup")
 

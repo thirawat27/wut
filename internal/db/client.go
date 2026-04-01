@@ -259,7 +259,7 @@ func (c *Client) SearchPages(ctx context.Context, query string) ([]Page, error) 
 	// Try local storage first if offline mode or auto-detect
 	if c.offlineMode.Load() || (c.autoDetect && !c.IsOnline(ctx)) {
 		if c.storage != nil {
-			storedPages, err := c.storage.SearchLocal(query)
+			storedPages, err := c.storage.SearchLocalLimited(query, 50)
 			if err == nil && len(storedPages) > 0 {
 				pages := make([]Page, len(storedPages))
 				for i, sp := range storedPages {
@@ -480,12 +480,8 @@ func formatCommand(cmd string) string {
 func (c *Client) GetAvailableCommands(ctx context.Context) ([]string, error) {
 	// Try local storage first
 	if c.storage != nil {
-		pages, err := c.storage.GetAllPages()
-		if err == nil && len(pages) > 0 {
-			commands := make([]string, len(pages))
-			for i, page := range pages {
-				commands[i] = page.Name
-			}
+		commands, err := c.storage.ListCommands(0)
+		if err == nil && len(commands) > 0 {
 			return commands, nil
 		}
 	}

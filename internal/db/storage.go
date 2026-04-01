@@ -2,7 +2,9 @@
 package db
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +16,8 @@ const (
 	tldrBucketName = "tldr_pages"
 	metadataBucket = "tldr_metadata"
 )
+
+var errStopScan = errors.New("stop scan")
 
 // Storage provides local storage for TLDR pages
 type Storage struct {
@@ -37,6 +41,37 @@ type Metadata struct {
 	LastSync   time.Time `json:"last_sync"`
 	TotalPages int       `json:"total_pages"`
 	Platforms  []string  `json:"platforms"`
+}
+
+type storedPageSummary struct {
+	Name        string `json:"name"`
+	Platform    string `json:"platform"`
+	Language    string `json:"language"`
+	Description string `json:"description"`
+}
+
+func pageKey(language, platform, name string) string {
+	if language == "" {
+		language = "en"
+	}
+	return fmt.Sprintf("%s/%s/%s", language, platform, name)
+}
+
+func parsePageKey(key []byte) (language, platform, name string, ok bool) {
+	parts := strings.SplitN(string(key), "/", 3)
+	if len(parts) != 3 {
+		return "", "", "", false
+	}
+	return parts[0], parts[1], parts[2], true
+}
+
+func summaryToStoredPage(summary storedPageSummary) StoredPage {
+	return StoredPage{
+		Name:        summary.Name,
+		Platform:    summary.Platform,
+		Language:    summary.Language,
+		Description: summary.Description,
+	}
 }
 
 // NewStorage creates a new TLDR storage
@@ -91,11 +126,7 @@ func (s *Storage) SavePage(page *Page) error {
 		return fmt.Errorf("failed to marshal page: %w", err)
 	}
 
-	lang := page.Language
-	if lang == "" {
-		lang = "en"
-	}
-	key := fmt.Sprintf("%s/%s/%s", lang, page.Platform, page.Name)
+	key := pageKey(page.Language, page.Platform, page.Name)
 
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(tldrBucketName))
@@ -123,11 +154,7 @@ func (s *Storage) SavePages(pages []*Page) error {
 				return fmt.Errorf("failed to marshal page %s: %w", page.Name, err)
 			}
 
-			lang := page.Language
-			if lang == "" {
-				lang = "en"
-			}
-			key := fmt.Sprintf("%s/%s/%s", lang, page.Platform, page.Name)
+			key := pageKey(page.Language, page.Platform, page.Name)
 			if err := bucket.Put([]byte(key), data); err != nil {
 				return err
 			}
@@ -142,7 +169,7 @@ func (s *Storage) GetPage(name, platform, language string) (*Page, error) {
 		language = "en"
 	}
 
-	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
+	key := pageKey(language, platform, name)
 
 	var stored StoredPage
 	err := s.db.View(func(tx *bbolt.Tx) error {
@@ -151,7 +178,7 @@ func (s *Storage) GetPage(name, platform, language string) (*Page, error) {
 
 		// Fallback to English if not found
 		if data == nil && language != "en" {
-			fallbackKey := fmt.Sprintf("en/%s/%s", platform, name)
+			fallbackKey := pageKey("en", platform, name)
 			data = bucket.Get([]byte(fallbackKey))
 		}
 
@@ -176,6 +203,10 @@ func (s *Storage) GetPage(name, platform, language string) (*Page, error) {
 
 // GetPageAnyPlatform tries to get a page from any available platform in local storage
 func (s *Storage) GetPageAnyPlatform(name, language string) (*Page, error) {
+	if language == "" {
+		language = "en"
+	}
+
 	platforms := []string{
 		PlatformCommon,
 		PlatformLinux,
@@ -188,14 +219,38 @@ func (s *Storage) GetPageAnyPlatform(name, language string) (*Page, error) {
 		PlatformAndroid,
 	}
 
-	for _, platform := range platforms {
-		page, err := s.GetPage(name, platform, language)
-		if err == nil {
-			return page, nil
+	var stored StoredPage
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		languages := []string{language}
+		if language != "en" {
+			languages = append(languages, "en")
 		}
+
+		for _, lang := range languages {
+			for _, platform := range platforms {
+				data := bucket.Get([]byte(pageKey(lang, platform, name)))
+				if data == nil {
+					continue
+				}
+				return json.Unmarshal(data, &stored)
+			}
+		}
+
+		return fmt.Errorf("page not found")
+	})
+	if err != nil {
+		return nil, fmt.Errorf("page not found in local storage: %s", name)
 	}
 
-	return nil, fmt.Errorf("page not found in local storage: %s", name)
+	return &Page{
+		Name:        stored.Name,
+		Platform:    stored.Platform,
+		Language:    stored.Language,
+		Description: stored.Description,
+		Examples:    stored.Examples,
+		RawContent:  stored.RawContent,
+	}, nil
 }
 
 // PageExists checks if a page exists in local storage
@@ -203,7 +258,7 @@ func (s *Storage) PageExists(name, platform, language string) bool {
 	if language == "" {
 		language = "en"
 	}
-	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
+	key := pageKey(language, platform, name)
 	exists := false
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
@@ -220,7 +275,7 @@ func (s *Storage) IsPageStale(name, platform, language string, maxAge time.Durat
 	if language == "" {
 		language = "en"
 	}
-	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
+	key := pageKey(language, platform, name)
 	isStale := true
 
 	_ = s.db.View(func(tx *bbolt.Tx) error {
@@ -260,19 +315,81 @@ func (s *Storage) GetAllPages() ([]StoredPage, error) {
 	return pages, err
 }
 
-// GetPagesByPlatform returns all pages for a specific platform
-func (s *Storage) GetPagesByPlatform(platform string) ([]StoredPage, error) {
+// GetPageSummaries returns page metadata without examples/raw content to reduce
+// allocations in list/search flows.
+func (s *Storage) GetPageSummaries(limit int) ([]StoredPage, error) {
 	var pages []StoredPage
-	prefix := platform + "/"
 
 	err := s.db.View(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(tldrBucketName))
 		return bucket.ForEach(func(k, v []byte) error {
-			if len(k) > len(prefix) && string(k[:len(prefix)]) == prefix {
-				var stored StoredPage
-				if err := json.Unmarshal(v, &stored); err == nil {
-					pages = append(pages, stored)
+			var summary storedPageSummary
+			if err := json.Unmarshal(v, &summary); err == nil {
+				pages = append(pages, summaryToStoredPage(summary))
+				if limit > 0 && len(pages) >= limit {
+					return errStopScan
 				}
+			}
+			return nil
+		})
+	})
+	if errors.Is(err, errStopScan) {
+		err = nil
+	}
+
+	return pages, err
+}
+
+// ListCommands returns unique command names from the TLDR bucket without
+// unmarshalling full page payloads.
+func (s *Storage) ListCommands(limit int) ([]string, error) {
+	seen := make(map[string]struct{})
+	commands := make([]string, 0)
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			_, _, name, ok := parsePageKey(k)
+			if !ok {
+				return nil
+			}
+			if _, exists := seen[name]; exists {
+				return nil
+			}
+			seen[name] = struct{}{}
+			commands = append(commands, name)
+			if limit > 0 && len(commands) >= limit {
+				return errStopScan
+			}
+			return nil
+		})
+	})
+	if errors.Is(err, errStopScan) {
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	sort.Strings(commands)
+	return commands, nil
+}
+
+// GetPagesByPlatform returns all pages for a specific platform
+func (s *Storage) GetPagesByPlatform(platform string) ([]StoredPage, error) {
+	var pages []StoredPage
+	platform = strings.ToLower(strings.TrimSpace(platform))
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			_, keyPlatform, _, ok := parsePageKey(k)
+			if !ok || keyPlatform != platform {
+				return nil
+			}
+			var stored StoredPage
+			if err := json.Unmarshal(v, &stored); err == nil {
+				pages = append(pages, stored)
 			}
 			return nil
 		})
@@ -286,7 +403,7 @@ func (s *Storage) DeletePage(name, platform, language string) error {
 	if language == "" {
 		language = "en"
 	}
-	key := fmt.Sprintf("%s/%s/%s", language, platform, name)
+	key := pageKey(language, platform, name)
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket([]byte(tldrBucketName))
 		return bucket.Delete([]byte(key))
@@ -343,17 +460,25 @@ func (s *Storage) GetStats() (map[string]any, error) {
 		"platforms":   map[string]int{},
 	}
 
-	pages, err := s.GetAllPages()
+	platforms := map[string]int{}
+	totalPages := 0
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			_, platform, _, ok := parsePageKey(k)
+			if ok {
+				totalPages++
+				platforms[platform]++
+			}
+			return nil
+		})
+	})
 	if err != nil {
 		return nil, err
 	}
 
-	platforms := map[string]int{}
-	for _, page := range pages {
-		platforms[page.Platform]++
-	}
-
-	stats["total_pages"] = len(pages)
+	stats["total_pages"] = totalPages
 	stats["platforms"] = platforms
 
 	// Get last sync
@@ -366,22 +491,42 @@ func (s *Storage) GetStats() (map[string]any, error) {
 
 // SearchLocal searches pages in local storage by name or description
 func (s *Storage) SearchLocal(query string) ([]StoredPage, error) {
+	return s.SearchLocalLimited(query, 0)
+}
+
+// SearchLocalLimited searches page metadata locally and optionally stops after
+// `limit` matches to keep interactive search responsive.
+func (s *Storage) SearchLocalLimited(query string, limit int) ([]StoredPage, error) {
 	var results []StoredPage
-	queryLower := strings.ToLower(query)
+	queryLower := strings.ToLower(strings.TrimSpace(query))
 
-	pages, err := s.GetAllPages()
-	if err != nil {
-		return nil, err
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			_, _, keyName, ok := parsePageKey(k)
+			if !ok {
+				return nil
+			}
+
+			var summary storedPageSummary
+			if err := json.Unmarshal(v, &summary); err != nil {
+				return nil
+			}
+
+			if queryLower == "" ||
+				strings.Contains(strings.ToLower(keyName), queryLower) ||
+				strings.Contains(strings.ToLower(summary.Description), queryLower) {
+				results = append(results, summaryToStoredPage(summary))
+				if limit > 0 && len(results) >= limit {
+					return errStopScan
+				}
+			}
+			return nil
+		})
+	})
+	if errors.Is(err, errStopScan) {
+		err = nil
 	}
 
-	for _, page := range pages {
-		nameLower := strings.ToLower(page.Name)
-		descLower := strings.ToLower(page.Description)
-
-		if strings.Contains(nameLower, queryLower) || strings.Contains(descLower, queryLower) {
-			results = append(results, page)
-		}
-	}
-
-	return results, nil
+	return results, err
 }

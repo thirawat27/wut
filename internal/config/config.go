@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -253,10 +254,14 @@ func setDefaults() {
 	viper.SetDefault("ui.pagination", 10)
 
 	viper.SetDefault("database.type", "bbolt")
+	viper.SetDefault("database.path", getDefaultDatabasePath())
 	viper.SetDefault("database.max_size", 100)
 
 	viper.SetDefault("history.enabled", true)
 	viper.SetDefault("history.max_entries", 10000)
+
+	viper.SetDefault("logging.level", "info")
+	viper.SetDefault("logging.file", getDefaultLogPath())
 
 	// TLDR defaults
 	viper.SetDefault("tldr.enabled", true)
@@ -300,7 +305,7 @@ ui:
 
 database:
   type: "bbolt"
-  path: "~/.wut/data"
+  path: "~/.config/wut/wut.db"
   max_size: 100
   backup_enabled: true
   backup_interval: 24
@@ -335,7 +340,7 @@ privacy:
 
 logging:
   level: "info"
-  file: "~/.wut/logs/wut.log"
+  file: "~/.config/wut/logs/wut.log"
   max_size: 10
   max_backups: 5
   max_age: 30
@@ -351,7 +356,7 @@ func expandPaths(cfg *Config) {
 
 	// Expand database path
 	if cfg.Database.Path != "" {
-		cfg.Database.Path = expandPath(cfg.Database.Path, homeDir)
+		cfg.Database.Path = ResolveDatabasePath(cfg.Database.Path)
 	}
 
 	// Expand log path
@@ -370,45 +375,99 @@ func expandPath(path, homeDir string) string {
 
 // getDefaultConfigPath returns the default configuration file path
 func getDefaultConfigPath() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ".wut.yaml"
-	}
-
-	// Check XDG_CONFIG_HOME first
-	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
-		return filepath.Join(xdgConfig, "wut", "config.yaml")
-	}
-
-	// Use default location
-	return filepath.Join(homeDir, ".config", "wut", "config.yaml")
+	return filepath.Join(getDefaultAppDir(), "config.yaml")
 }
 
 // GetDataDir returns the data directory path
 func GetDataDir() string {
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return ".wut"
-	}
-	return filepath.Join(homeDir, ".wut")
+	return filepath.Dir(GetDatabasePath())
 }
 
 // EnsureDirs ensures all necessary directories exist
 func EnsureDirs() error {
-	dataDir := GetDataDir()
+	homeDir, _ := os.UserHomeDir()
 	dirs := []string{
-		dataDir,
-		filepath.Join(dataDir, "data"),
-		filepath.Join(dataDir, "logs"),
+		filepath.Dir(GetConfigPath()),
+		filepath.Dir(GetDatabasePath()),
+		filepath.Dir(GetTLDRDatabasePath()),
+		filepath.Dir(expandPath(Get().Logging.File, homeDir)),
 	}
 
+	seen := make(map[string]struct{}, len(dirs))
 	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		dir = filepath.Clean(dir)
+		if _, ok := seen[dir]; ok {
+			continue
+		}
+		seen[dir] = struct{}{}
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
 	}
 
 	return nil
+}
+
+// GetDatabasePath returns the canonical path to the primary WUT database file.
+func GetDatabasePath() string {
+	return ResolveDatabasePath(Get().Database.Path)
+}
+
+// GetTLDRDatabasePath returns the canonical path to the TLDR cache database file.
+func GetTLDRDatabasePath() string {
+	return filepath.Join(filepath.Dir(GetDatabasePath()), "tldr.db")
+}
+
+// ResolveDatabasePath normalizes a configured database path while preserving
+// existing single-file database locations for backward compatibility.
+func ResolveDatabasePath(path string) string {
+	homeDir, _ := os.UserHomeDir()
+
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return getDefaultDatabasePath()
+	}
+
+	path = expandPath(path, homeDir)
+	cleaned := filepath.Clean(path)
+
+	if info, err := os.Stat(cleaned); err == nil {
+		if info.IsDir() {
+			return filepath.Join(cleaned, "wut.db")
+		}
+		return cleaned
+	}
+
+	switch strings.ToLower(filepath.Ext(cleaned)) {
+	case ".db", ".bolt", ".bbolt":
+		return cleaned
+	default:
+		return filepath.Join(cleaned, "wut.db")
+	}
+}
+
+func getDefaultAppDir() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "wut"
+	}
+
+	if xdgConfig := os.Getenv("XDG_CONFIG_HOME"); xdgConfig != "" {
+		return filepath.Join(xdgConfig, "wut")
+	}
+
+	return filepath.Join(homeDir, ".config", "wut")
+}
+
+func getDefaultDatabasePath() string {
+	return filepath.Join(getDefaultAppDir(), "wut.db")
+}
+
+func getDefaultLogPath() string {
+	return filepath.Join(getDefaultAppDir(), "logs", "wut.log")
 }
 
 // GetConfigPath returns the current configuration file path

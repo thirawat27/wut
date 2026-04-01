@@ -74,20 +74,25 @@ func runSmart(cmd *cobra.Command, args []string) error {
 	// Show context header
 	printContextInfo(appCtx)
 
+	// Initialize storage once and reuse it for correction, ranking and history.
+	storage := openSmartStorage(log)
+	if storage != nil {
+		defer storage.Close()
+	}
+
 	// Check for typos if enabled
 	if smartCorrect && query != "" {
 		c := corrector.New()
 
 		// Optional: supply history to corrector for better matching
-		if s, err := db.NewStorage(config.Get().Database.Path); err == nil {
-			if history, err := s.GetHistory(context.Background(), 100); err == nil {
-				var historyCmds []string
+		if storage != nil {
+			if history, err := storage.GetHistory(context.Background(), 100); err == nil {
+				historyCmds := make([]string, 0, len(history))
 				for _, h := range history {
 					historyCmds = append(historyCmds, h.Command)
 				}
 				c.SetHistoryCommands(historyCmds)
 			}
-			s.Close()
 		}
 
 		if correction, err := c.Correct(query); err == nil && correction != nil {
@@ -99,36 +104,6 @@ func runSmart(cmd *cobra.Command, args []string) error {
 				query = correction.Corrected
 			}
 		}
-	}
-
-	// Initialize storage with timeout check
-	cfg := config.Get()
-	var storage *db.Storage
-
-	// Try to open storage with timeout
-	storageCh := make(chan *db.Storage, 1)
-	storageErrCh := make(chan error, 1)
-
-	go func() {
-		s, err := db.NewStorage(cfg.Database.Path)
-		if err != nil {
-			storageErrCh <- err
-			return
-		}
-		storageCh <- s
-	}()
-
-	select {
-	case storage = <-storageCh:
-		// Successfully opened
-		defer storage.Close()
-	case err := <-storageErrCh:
-		log.Warn("failed to initialize storage, continuing without history", "error", err)
-		storage = nil
-	case <-time.After(500 * time.Millisecond):
-		// Timeout opening database
-		log.Warn("storage initialization timeout, continuing without history")
-		storage = nil
 	}
 
 	// Create smart engine
@@ -192,6 +167,31 @@ func runSmart(cmd *cobra.Command, args []string) error {
 				log.Debug("failed to record history", "error", err)
 			}
 		}()
+	}
+
+	return nil
+}
+
+func openSmartStorage(log *logger.Logger) *db.Storage {
+	storageCh := make(chan *db.Storage, 1)
+	storageErrCh := make(chan error, 1)
+
+	go func() {
+		s, err := db.NewStorage(config.GetDatabasePath())
+		if err != nil {
+			storageErrCh <- err
+			return
+		}
+		storageCh <- s
+	}()
+
+	select {
+	case storage := <-storageCh:
+		return storage
+	case err := <-storageErrCh:
+		log.Warn("failed to initialize storage, continuing without history", "error", err)
+	case <-time.After(500 * time.Millisecond):
+		log.Warn("storage initialization timeout, continuing without history")
 	}
 
 	return nil

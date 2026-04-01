@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -238,14 +237,7 @@ func runDBUpdate(cmd *cobra.Command, args []string) error {
 
 // getDBPath returns the path to the database
 func getDBPath() string {
-	cfg := config.Get()
-	if cfg.Database.Path != "" {
-		return filepath.Join(filepath.Dir(cfg.Database.Path), "tldr.db")
-	}
-
-	// Default path
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "wut", "tldr.db")
+	return config.GetTLDRDatabasePath()
 }
 
 // formatSyncResult formats the sync result for display
