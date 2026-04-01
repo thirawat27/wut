@@ -23,7 +23,7 @@ import (
 
 var (
 	// Version is set during build
-	Version = "0.2.0"
+	Version = "0.3.0"
 	// BuildTime is set during build
 	BuildTime = "unknown"
 	// Commit is set during build

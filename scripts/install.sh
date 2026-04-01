@@ -50,7 +50,7 @@ Options:
 
 Examples:
     curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash
-    curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --version v0.2.0
+    curl -fsSL https://raw.githubusercontent.com/thirawat27/wut/main/scripts/install.sh | bash -s -- --version v0.3.0
 EOF
 }
 
