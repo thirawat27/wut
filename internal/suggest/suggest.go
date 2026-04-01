@@ -2,10 +2,13 @@ package suggest
 
 import (
 	"context"
+	"math"
 	"sort"
 	"strings"
+	"time"
 
 	"wut/internal/db"
+	"wut/internal/historyml"
 
 	"github.com/agnivade/levenshtein"
 )
@@ -36,12 +39,12 @@ func (s *Suggester) Suggest(ctx context.Context, query string, limit int) ([]Res
 		limit = 5
 	}
 
-	entries, err := s.storage.GetHistory(ctx, 0)
+	summaries, err := s.storage.GetHistoryCommandSummaries(ctx, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	results := s.scoreSuggestions(query, entries)
+	results := s.scoreSuggestions(query, summaries)
 
 	sort.Slice(results, func(i, j int) bool {
 		return results[i].Score > results[j].Score
@@ -55,14 +58,18 @@ func (s *Suggester) Suggest(ctx context.Context, query string, limit int) ([]Res
 }
 
 // scoreSuggestions scores history entries based on query match
-func (s *Suggester) scoreSuggestions(query string, entries []db.CommandExecution) []Result {
+func (s *Suggester) scoreSuggestions(query string, summaries []db.HistoryCommandSummary) []Result {
 	query = strings.ToLower(strings.TrimSpace(query))
 	results := make([]Result, 0)
+	summaryMap := make(map[string]db.HistoryCommandSummary, len(summaries))
 
-	freqs := make(map[string]int)
-	for _, e := range entries {
-		freqs[e.Command]++
+	freqs := make(map[string]int, len(summaries))
+	for _, summary := range summaries {
+		freqs[summary.Command] = summary.UsageCount
+		summaryMap[summary.Command] = summary
 	}
+
+	ranker := historyml.Train(toHistorySamples(summaries), time.Now())
 
 	for cmd, usageCount := range freqs {
 		cmdLower := strings.ToLower(cmd)
@@ -103,6 +110,8 @@ func (s *Suggester) scoreSuggestions(query string, entries []db.CommandExecution
 		}
 
 		if score > 0 {
+			summary := summaryMap[cmd]
+			score += historyBoost(summary, ranker)
 			results = append(results, Result{
 				Command: cmd,
 				Score:   score,
@@ -167,21 +176,17 @@ func getCommonCommands(query string) []string {
 
 // GetMostUsed returns the most frequently used commands
 func (s *Suggester) GetMostUsed(ctx context.Context, limit int) ([]Result, error) {
-	entries, err := s.storage.GetHistory(ctx, 0)
+	summaries, err := s.storage.GetHistoryCommandSummaries(ctx, 0)
 	if err != nil {
 		return nil, err
 	}
 
-	freqs := make(map[string]int)
-	for _, e := range entries {
-		freqs[e.Command]++
-	}
-
-	var results []Result
-	for cmd, count := range freqs {
+	results := make([]Result, 0, len(summaries))
+	ranker := historyml.Train(toHistorySamples(summaries), time.Now())
+	for _, summary := range summaries {
 		results = append(results, Result{
-			Command: cmd,
-			Score:   float64(count),
+			Command: summary.Command,
+			Score:   float64(summary.UsageCount) + historyBoost(summary, ranker),
 			Source:  "history",
 		})
 	}
@@ -199,4 +204,32 @@ func (s *Suggester) GetMostUsed(ctx context.Context, limit int) ([]Result, error
 
 func (s *Suggester) Close() error {
 	return nil
+}
+
+func toHistorySamples(summaries []db.HistoryCommandSummary) []historyml.CommandSample {
+	samples := make([]historyml.CommandSample, 0, len(summaries))
+	for _, summary := range summaries {
+		samples = append(samples, historyml.CommandSample{
+			Command:     summary.Command,
+			UsageCount:  summary.UsageCount,
+			LastUsed:    summary.LastUsed,
+			SourceOS:    summary.SourceOS,
+			SourceShell: summary.SourceShell,
+		})
+	}
+	return samples
+}
+
+func historyBoost(summary db.HistoryCommandSummary, ranker *historyml.Ranker) float64 {
+	boost := math.Log1p(float64(summary.UsageCount)) * 8
+	if ranker == nil {
+		return boost
+	}
+	return boost + ranker.Score(historyml.CommandSample{
+		Command:     summary.Command,
+		UsageCount:  summary.UsageCount,
+		LastUsed:    summary.LastUsed,
+		SourceOS:    summary.SourceOS,
+		SourceShell: summary.SourceShell,
+	})*40
 }

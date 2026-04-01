@@ -1,12 +1,9 @@
 package cmd
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strings"
@@ -22,7 +19,7 @@ import (
 	"wut/internal/db"
 	"wut/internal/logger"
 	"wut/internal/metrics"
-	"wut/internal/performance"
+	"wut/internal/shell"
 )
 
 // historyCmd represents the history command
@@ -101,6 +98,8 @@ func runHistory(cmd *cobra.Command, args []string) error {
 	if historyImportShell {
 		return importShellHistory(ctx, storage)
 	}
+
+	hydrateHistoryFromShell(ctx, storage)
 
 	if historyStats {
 		return showHistoryStats(ctx, storage)
@@ -285,6 +284,7 @@ func (m historyModel) View() string {
 
 	// ซ่อน timestamp บนจอแคบ (< 50 col)
 	showTime := w >= 50
+	showSource := w >= 78
 
 	// availWidth: พื้นที่สำหรับ command text
 	// index(4) + space(1) + time+brackets(13) + spaces(3) + cursor(2) = 23 เมื่อมี time
@@ -294,6 +294,9 @@ func (m historyModel) View() string {
 		availWidth = innerWidth - 23
 	} else {
 		availWidth = innerWidth - 7
+	}
+	if showSource {
+		availWidth -= 20
 	}
 	if availWidth < 10 {
 		availWidth = 10
@@ -316,7 +319,13 @@ func (m historyModel) View() string {
 
 		if showTime {
 			timeStr := entry.Timestamp.Local().Format("01-02 15:04")
-			sb.WriteString(fmt.Sprintf("%s %s %s   %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), metaStyle.Render("["+timeStr+"]"), cmdStyle.Render(dispCmd)))
+			source := ""
+			if showSource {
+				if label := formatHistorySource(entry); label != "" {
+					source = metaStyle.Render(label) + "  "
+				}
+			}
+			sb.WriteString(fmt.Sprintf("%s %s %s   %s%s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), metaStyle.Render("["+timeStr+"]"), source, cmdStyle.Render(dispCmd)))
 		} else {
 			sb.WriteString(fmt.Sprintf("%s %s %s\n\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), cmdStyle.Render(dispCmd)))
 		}
@@ -354,21 +363,23 @@ func showHistory(ctx context.Context, storage *db.Storage) error {
 	var err error
 
 	if historySearch != "" {
-		entries, err = searchHistoryOptimized(storage, historySearch, historyLimit)
+		entries, err = searchHistoryOptimized(ctx, storage, historySearch, historyLimit)
 	} else {
-		// Pull more for pagination to be useful after deduplication
-		limit := historyLimit
-		if limit <= 20 {
-			limit = 1000 // default pull plenty to find unique entries
+		fetchLimit := historyLimit
+		if fetchLimit <= 20 {
+			fetchLimit = 200
 		}
-		entries, err = storage.GetHistory(ctx, limit)
+		scanLimit := fetchLimit * 25
+		if scanLimit < 500 {
+			scanLimit = 500
+		}
+		entries, err = storage.GetRecentUniqueHistory(ctx, fetchLimit, scanLimit)
 	}
 
 	if err != nil {
 		return fmt.Errorf("failed to get history: %w", err)
 	}
 
-	// Filter out duplicate commands to make UI much cleaner
 	entries = deduplicateHistory(entries)
 
 	if len(entries) == 0 {
@@ -386,41 +397,11 @@ func showHistory(ctx context.Context, storage *db.Storage) error {
 	return nil
 }
 
-func searchHistoryOptimized(storage *db.Storage, query string, limit int) ([]db.CommandExecution, error) {
-	matcher := performance.NewFastMatcher(false, 0.3, 3)
-
-	entries, err := storage.GetHistory(context.Background(), 10000)
-	if err != nil {
-		return nil, err
+func searchHistoryOptimized(ctx context.Context, storage *db.Storage, query string, limit int) ([]db.CommandExecution, error) {
+	if limit <= 0 {
+		limit = 50
 	}
-
-	type scoredEntry struct {
-		entry db.CommandExecution
-		score float64
-	}
-
-	var scored []scoredEntry
-	for _, entry := range entries {
-		result := matcher.Match(query, entry.Command)
-		if result.Matched {
-			scored = append(scored, scoredEntry{entry: entry, score: result.Score})
-		}
-	}
-
-	sort.Slice(scored, func(i, j int) bool {
-		return scored[i].score > scored[j].score
-	})
-
-	if limit > 0 && len(scored) > limit {
-		scored = scored[:limit]
-	}
-
-	results := make([]db.CommandExecution, len(scored))
-	for i, s := range scored {
-		results[i] = s.entry
-	}
-
-	return results, nil
+	return storage.SearchHistory(ctx, query, limit)
 }
 
 func getTotalCount(ctx context.Context, storage *db.Storage) int {
@@ -456,9 +437,21 @@ func showHistoryStats(ctx context.Context, storage *db.Storage) error {
 	if len(stats.TimeDistribution) > 0 {
 		catStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#3B82F6"))
 		fmt.Printf("%s\n", catStyle.Render("🕒 Time Distribution:"))
-		for k, v := range stats.TimeDistribution {
-			fmt.Printf("  • %-20s: %d\n", k, v)
-		}
+		printSortedDistribution(stats.TimeDistribution)
+		fmt.Println()
+	}
+
+	if len(stats.OSDistribution) > 0 {
+		catStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#8B5CF6"))
+		fmt.Printf("%s\n", catStyle.Render("🖥️ OS Distribution:"))
+		printSortedDistribution(stats.OSDistribution)
+		fmt.Println()
+	}
+
+	if len(stats.ShellDistribution) > 0 {
+		catStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#06B6D4"))
+		fmt.Printf("%s\n", catStyle.Render("🐚 Shell Distribution:"))
+		printSortedDistribution(stats.ShellDistribution)
 		fmt.Println()
 	}
 
@@ -475,134 +468,134 @@ func showHistoryStats(ctx context.Context, storage *db.Storage) error {
 	return nil
 }
 
-// Below is identical to old shell history import
+func formatHistorySource(entry db.CommandExecution) string {
+	sourceOS := strings.TrimSpace(entry.SourceOS)
+	shellName := strings.TrimSpace(entry.Shell)
+	if sourceOS == "unknown" {
+		sourceOS = ""
+	}
+	if shellName == "unknown" {
+		shellName = ""
+	}
+	switch {
+	case sourceOS != "" && shellName != "":
+		return fmt.Sprintf("[%s/%s]", sourceOS, shellName)
+	case sourceOS != "":
+		return fmt.Sprintf("[%s]", sourceOS)
+	case shellName != "":
+		return fmt.Sprintf("[%s]", shellName)
+	default:
+		return ""
+	}
+}
+
+func printSortedDistribution(values map[string]int) {
+	keys := make([]string, 0, len(values))
+	for key, count := range values {
+		if strings.TrimSpace(key) == "" || count <= 0 {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		fmt.Printf("  • %-20s: %d\n", key, values[key])
+	}
+}
+
 func importShellHistory(ctx context.Context, storage *db.Storage) error {
-	shellHistories := detectShellHistories()
-	if len(shellHistories) == 0 {
-		return fmt.Errorf("no shell history files detected")
+	summary, err := importShellHistoryEntries(ctx, storage, 0)
+	if err != nil {
+		return err
 	}
 
 	fmt.Println("🔍 Detected shells:")
-	for shellType, path := range shellHistories {
-		fmt.Printf("  • %s: %s\n", shellType, path)
+	for _, source := range summary.sources {
+		fmt.Printf("  • %s: %s\n", source.Shell, source.DisplayPath())
 	}
 	fmt.Println()
 
-	fmt.Println("📖 Importing shell histories sequentially...")
-	start := time.Now()
-
-	var allCommands []string
-	for shellType, path := range shellHistories {
-		commands, err := readShellHistory(shellType, path)
-		if err != nil {
-			fmt.Printf("Warning: Failed to read %s history: %v\n", shellType, err)
-			continue
-		}
-		allCommands = append(allCommands, commands...)
-		fmt.Printf("  ✓ %s: %d linear commands\n", shellType, len(commands))
+	for _, line := range summary.perShell {
+		fmt.Println(line)
 	}
 
-	if len(allCommands) == 0 {
-		fmt.Println("No history entries found in shell files")
+	if summary.imported == 0 {
+		fmt.Println("\nNo history entries found in shell files")
 		return nil
 	}
 
-	importStart := time.Now()
-	imported := 0
-
-	for _, cmd := range allCommands {
-		if cmd = strings.TrimSpace(cmd); cmd != "" {
-			if err := storage.AddHistory(ctx, cmd); err == nil {
-				imported++
-			}
-		}
-	}
-
-	fmt.Printf("\n✅ Successfully imported %d execution steps in %v (total time: %v)\n", imported, time.Since(importStart), time.Since(start))
+	fmt.Printf("\n✅ Successfully imported %d execution steps in %v\n", summary.imported, summary.duration)
 	return nil
 }
 
-func detectShellHistories() map[string]string {
-	shells := make(map[string]string)
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return shells
+func hydrateHistoryFromShell(ctx context.Context, storage *db.Storage) {
+	stats, err := storage.GetHistoryStats(ctx)
+	if err != nil || stats.TotalExecutions > 0 {
+		return
 	}
 
-	bashHistory := filepath.Join(home, ".bash_history")
-	if _, err := os.Stat(bashHistory); err == nil {
-		shells["bash"] = bashHistory
-	}
-
-	zshHistory := filepath.Join(home, ".zsh_history")
-	if _, err := os.Stat(zshHistory); err == nil {
-		shells["zsh"] = zshHistory
-	}
-
-	fishHistory := filepath.Join(home, ".local", "share", "fish", "fish_history")
-	if runtime.GOOS == "darwin" {
-		fishHistory = filepath.Join(home, ".config", "fish", "fish_history")
-	}
-	if _, err := os.Stat(fishHistory); err == nil {
-		shells["fish"] = fishHistory
-	}
-
-	psHistory := filepath.Join(home, "AppData", "Roaming", "Microsoft", "Windows", "PowerShell", "PSReadLine", "ConsoleHost_history.txt")
-	if runtime.GOOS != "windows" {
-		psHistory = filepath.Join(home, ".config", "powershell", "PSReadLine", "ConsoleHost_history.txt")
-		if _, err := os.Stat(psHistory); err != nil {
-			psHistory = filepath.Join(home, ".local", "share", "powershell", "PSReadLine", "ConsoleHost_history.txt")
-		}
-	}
-	if _, err := os.Stat(psHistory); err == nil {
-		shells["powershell"] = psHistory
-	}
-
-	return shells
+	hydrateCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	_, _ = importShellHistoryEntries(hydrateCtx, storage, 500)
 }
 
-func readShellHistory(shellType, path string) ([]string, error) {
-	file, err := os.Open(path)
+type shellHistoryImportSummary struct {
+	sources  []shell.HistorySource
+	perShell []string
+	imported int
+	duration time.Duration
+}
+
+func importShellHistoryEntries(ctx context.Context, storage *db.Storage, limitPerShell int) (*shellHistoryImportSummary, error) {
+	sources := shell.DetectHistorySources()
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("no shell history files detected")
+	}
+
+	start := time.Now()
+	allEntries := make([]db.CommandExecution, 0, 4096)
+	perShell := make([]string, 0, len(sources))
+	for _, source := range sources {
+		commands, err := shell.ReadHistory(source)
+		if err != nil {
+			perShell = append(perShell, fmt.Sprintf("  ! %s (%s): failed to read history (%v)", source.Shell, source.DisplayPath(), err))
+			continue
+		}
+		if limitPerShell > 0 && len(commands) > limitPerShell {
+			commands = commands[len(commands)-limitPerShell:]
+		}
+		for _, command := range commands {
+			allEntries = append(allEntries, db.CommandExecution{
+				Command:  command,
+				SourceOS: runtime.GOOS,
+				Shell:    source.Shell,
+			})
+		}
+		perShell = append(perShell, fmt.Sprintf("  ✓ %s: %d commands (%s)", source.Shell, len(commands), source.DisplayPath()))
+	}
+
+	if len(allEntries) == 0 {
+		return &shellHistoryImportSummary{
+			sources:  sources,
+			perShell: perShell,
+			duration: time.Since(start),
+		}, nil
+	}
+
+	imported, err := storage.AddHistoryBatch(ctx, allEntries)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to import shell history: %w", err)
 	}
-	defer file.Close()
-
-	var commands []string
-	scanner := bufio.NewScanner(file)
-
-	// Increase max line length for large history entries
-	buf := make([]byte, 0, 64*1024)
-	scanner.Buffer(buf, 1024*1024)
-
-	switch shellType {
-	case "fish":
-		for scanner.Scan() {
-			line := scanner.Text()
-			if after, ok := strings.CutPrefix(line, "- cmd: "); ok {
-				commands = append(commands, after)
-			}
-		}
-	case "zsh":
-		for scanner.Scan() {
-			line := scanner.Text()
-			if _, after, ok := strings.Cut(line, ";"); ok {
-				commands = append(commands, after)
-			} else if line != "" {
-				commands = append(commands, line)
-			}
-		}
-	default:
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line != "" {
-				commands = append(commands, line)
-			}
+	if maxEntries := config.Get().History.MaxEntries; maxEntries > 0 {
+		if err := storage.TrimHistory(ctx, maxEntries); err != nil {
+			return nil, fmt.Errorf("failed to trim history: %w", err)
 		}
 	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
-	return commands, nil
+	return &shellHistoryImportSummary{
+		sources:  sources,
+		perShell: perShell,
+		imported: imported,
+		duration: time.Since(start),
+	}, nil
 }

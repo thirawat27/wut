@@ -46,6 +46,7 @@ func runFix(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to open database: %w", err)
 	}
 	defer store.Close()
+	hydrateHistoryFromShell(context.Background(), store)
 
 	c := corrector.New()
 

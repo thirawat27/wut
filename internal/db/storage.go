@@ -36,6 +36,13 @@ type StoredPage struct {
 	FetchedAt   time.Time `json:"fetched_at"`
 }
 
+// PageRef identifies a specific stored TLDR page variant.
+type PageRef struct {
+	Name     string
+	Platform string
+	Language string
+}
+
 // Metadata stores sync information
 type Metadata struct {
 	LastSync   time.Time `json:"last_sync"`
@@ -48,6 +55,10 @@ type storedPageSummary struct {
 	Platform    string `json:"platform"`
 	Language    string `json:"language"`
 	Description string `json:"description"`
+}
+
+type storedPageTimestamp struct {
+	FetchedAt time.Time `json:"fetched_at"`
 }
 
 func pageKey(language, platform, name string) string {
@@ -270,6 +281,48 @@ func (s *Storage) PageExists(name, platform, language string) bool {
 	return exists && err == nil
 }
 
+// PageExistsAnyPlatform checks whether a command exists in local storage for
+// any supported platform, falling back to English when needed.
+func (s *Storage) PageExistsAnyPlatform(name, language string) bool {
+	if language == "" {
+		language = "en"
+	}
+
+	platforms := []string{
+		PlatformCommon,
+		PlatformLinux,
+		PlatformMacOS,
+		PlatformWindows,
+		PlatformFreeBSD,
+		PlatformOpenBSD,
+		PlatformNetBSD,
+		PlatformSunOS,
+		PlatformAndroid,
+	}
+
+	exists := false
+
+	_ = s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		languages := []string{language}
+		if language != "en" {
+			languages = append(languages, "en")
+		}
+
+		for _, lang := range languages {
+			for _, platform := range platforms {
+				if bucket.Get([]byte(pageKey(lang, platform, name))) != nil {
+					exists = true
+					return errStopScan
+				}
+			}
+		}
+		return nil
+	})
+
+	return exists
+}
+
 // IsPageStale checks if a page is older than the given duration
 func (s *Storage) IsPageStale(name, platform, language string, maxAge time.Duration) bool {
 	if language == "" {
@@ -413,11 +466,13 @@ func (s *Storage) DeletePage(name, platform, language string) error {
 // ClearAll removes all pages from local storage
 func (s *Storage) ClearAll() error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
-		if err := tx.DeleteBucket([]byte(tldrBucketName)); err != nil {
-			return err
-		}
-		if _, err := tx.CreateBucket([]byte(tldrBucketName)); err != nil {
-			return err
+		for _, bucketName := range []string{tldrBucketName, metadataBucket} {
+			if err := tx.DeleteBucket([]byte(bucketName)); err != nil && !errors.Is(err, bbolt.ErrBucketNotFound) {
+				return err
+			}
+			if _, err := tx.CreateBucket([]byte(bucketName)); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -487,6 +542,68 @@ func (s *Storage) GetStats() (map[string]any, error) {
 	}
 
 	return stats, nil
+}
+
+// CountPages returns the total number of stored TLDR pages.
+func (s *Storage) CountPages() (int, error) {
+	totalPages := 0
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			if _, _, _, ok := parsePageKey(k); ok {
+				totalPages++
+			}
+			return nil
+		})
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return totalPages, nil
+}
+
+// ListStalePages returns page variants older than maxAge.
+func (s *Storage) ListStalePages(maxAge time.Duration, limit int) ([]PageRef, error) {
+	stalePages := make([]PageRef, 0)
+	now := time.Now()
+
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket([]byte(tldrBucketName))
+		return bucket.ForEach(func(k, v []byte) error {
+			language, platform, name, ok := parsePageKey(k)
+			if !ok {
+				return nil
+			}
+
+			var stored storedPageTimestamp
+			if err := json.Unmarshal(v, &stored); err != nil {
+				return nil
+			}
+			if now.Sub(stored.FetchedAt) <= maxAge {
+				return nil
+			}
+
+			stalePages = append(stalePages, PageRef{
+				Name:     name,
+				Platform: platform,
+				Language: language,
+			})
+			if limit > 0 && len(stalePages) >= limit {
+				return errStopScan
+			}
+			return nil
+		})
+	})
+	if errors.Is(err, errStopScan) {
+		err = nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	return stalePages, nil
 }
 
 // SearchLocal searches pages in local storage by name or description

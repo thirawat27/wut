@@ -4,6 +4,7 @@ package db
 import (
 	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -32,6 +33,7 @@ type SyncOptions struct {
 	Commands    []string
 	Concurrency int
 	ForceUpdate bool
+	Offline     bool
 	OnProgress  func(current, total int, command string)
 }
 
@@ -43,6 +45,8 @@ type SyncResult struct {
 	Errors     []error
 	Duration   time.Duration
 }
+
+var errPageAlreadyCached = errors.New("page already cached")
 
 // NewSyncManager creates a new sync manager
 func NewSyncManager(storage *Storage) *SyncManager {
@@ -72,20 +76,21 @@ func (sm *SyncManager) Stop() {
 
 // SyncAll syncs all common commands to local storage
 func (sm *SyncManager) SyncAll(ctx context.Context) (*SyncResult, error) {
-	// 1. Prefer local source if available
-	localPaths := []string{
-		"tldr-main",
-		filepath.Join("tldr-main", "tldr-main"),
+	return sm.SyncAllWithOptions(ctx, SyncOptions{})
+}
+
+// SyncAllWithOptions syncs the full TLDR corpus, preferring a local checkout
+// when present and optionally refusing any network fallback.
+func (sm *SyncManager) SyncAllWithOptions(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
+	if root, ok := findLocalSyncRoot(); ok {
+		sm.log.Info("found local tldr directory, syncing from disk ...", "path", root)
+		return sm.syncFromLocalDir(ctx, root, commandSet(opts.Commands))
 	}
 
-	for _, p := range localPaths {
-		if stat, err := os.Stat(filepath.Join(p, "pages")); err == nil && stat.IsDir() {
-			sm.log.Info("found local tldr directory, syncing from disk ...", "path", p)
-			return sm.SyncFromLocalDir(ctx, p)
-		}
+	if opts.Offline {
+		return nil, fmt.Errorf("offline sync requires a local TLDR checkout in %s", formatLocalSyncRoots())
 	}
 
-	// 2. Fallback to downloading the full archive
 	zipURL := "https://github.com/tldr-pages/tldr/releases/latest/download/tldr.zip"
 	sm.log.Info("syncing from remote zip archive ...")
 	return sm.SyncFromZip(ctx, zipURL)
@@ -160,8 +165,77 @@ func (s *batchPageSaver) Result(start time.Time) *SyncResult {
 	}
 }
 
+func localSyncRoots() []string {
+	return []string{
+		"tldr-main",
+		filepath.Join("tldr-main", "tldr-main"),
+	}
+}
+
+func findLocalSyncRoot() (string, bool) {
+	for _, root := range localSyncRoots() {
+		if stat, err := os.Stat(filepath.Join(root, "pages")); err == nil && stat.IsDir() {
+			return root, true
+		}
+	}
+	return "", false
+}
+
+func formatLocalSyncRoots() string {
+	roots := localSyncRoots()
+	for i := range roots {
+		roots[i] = filepath.ToSlash(roots[i])
+	}
+	return strings.Join(roots, " or ")
+}
+
+func commandSet(commands []string) map[string]struct{} {
+	if len(commands) == 0 {
+		return nil
+	}
+
+	set := make(map[string]struct{}, len(commands))
+	for _, command := range commands {
+		command = strings.ToLower(strings.TrimSpace(command))
+		if command == "" {
+			continue
+		}
+		set[command] = struct{}{}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	return set
+}
+
+func uniqueCommandsFromPageRefs(refs []PageRef) []string {
+	if len(refs) == 0 {
+		return nil
+	}
+
+	seen := make(map[string]struct{}, len(refs))
+	commands := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		command := strings.ToLower(strings.TrimSpace(ref.Name))
+		if command == "" {
+			continue
+		}
+		if _, ok := seen[command]; ok {
+			continue
+		}
+		seen[command] = struct{}{}
+		commands = append(commands, command)
+	}
+
+	return commands
+}
+
 // SyncFromLocalDir reads an extracted tldr-pages archive directory
 func (sm *SyncManager) SyncFromLocalDir(ctx context.Context, pagesDir string) (*SyncResult, error) {
+	return sm.syncFromLocalDir(ctx, pagesDir, nil)
+}
+
+func (sm *SyncManager) syncFromLocalDir(ctx context.Context, pagesDir string, filter map[string]struct{}) (*SyncResult, error) {
 	start := time.Now()
 	saver := newBatchPageSaver(sm.storage, sm.log, 500)
 
@@ -197,6 +271,11 @@ func (sm *SyncManager) SyncFromLocalDir(ctx context.Context, pagesDir string) (*
 
 		platform := parts[1]
 		command := strings.TrimSuffix(parts[2], ".md")
+		if len(filter) > 0 {
+			if _, ok := filter[command]; !ok {
+				return nil
+			}
+		}
 
 		content, err := os.ReadFile(path)
 		if err != nil {
@@ -312,13 +391,17 @@ func (sm *SyncManager) SyncFromZip(ctx context.Context, zipURL string) (*SyncRes
 }
 
 func (sm *SyncManager) finishBatchSync(result *SyncResult) (*SyncResult, error) {
-	// Update metadata
-	meta := &Metadata{
-		LastSync:   time.Now(),
-		TotalPages: result.Downloaded,
-		Platforms:  []string{PlatformCommon, PlatformLinux, PlatformMacOS, PlatformWindows, PlatformAndroid, PlatformFreeBSD, PlatformNetBSD, PlatformOpenBSD, PlatformSunOS},
-	}
-	if err := sm.storage.SaveMetadata(meta); err != nil {
+	if err := sm.saveSyncMetadata([]string{
+		PlatformCommon,
+		PlatformLinux,
+		PlatformMacOS,
+		PlatformWindows,
+		PlatformAndroid,
+		PlatformFreeBSD,
+		PlatformNetBSD,
+		PlatformOpenBSD,
+		PlatformSunOS,
+	}); err != nil {
 		sm.log.Warn("failed to save metadata", "error", err)
 	}
 
@@ -341,6 +424,10 @@ func (sm *SyncManager) SyncCommandsWithOptions(ctx context.Context, opts SyncOpt
 	start := time.Now()
 	result := &SyncResult{}
 
+	if opts.Offline {
+		return sm.SyncAllWithOptions(ctx, opts)
+	}
+
 	// If no commands specified, get popular ones
 	if len(opts.Commands) == 0 {
 		var err error
@@ -358,7 +445,7 @@ func (sm *SyncManager) SyncCommandsWithOptions(ctx context.Context, opts SyncOpt
 	// Create task function for each command
 	taskFunc := func(command string) func(context.Context) error {
 		return func(ctx context.Context) error {
-			err := sm.syncCommand(ctx, command)
+			err := sm.syncCommand(ctx, command, opts.ForceUpdate)
 
 			// Update progress
 			current := atomic.AddInt64(&currentCount, 1)
@@ -394,7 +481,7 @@ func (sm *SyncManager) SyncCommandsWithOptions(ctx context.Context, opts SyncOpt
 	// Process results
 	for i, res := range results {
 		if res != nil {
-			if strings.Contains(res.Error(), "page not found") {
+			if errors.Is(res, errPageNotFound) || errors.Is(res, errPageAlreadyCached) {
 				result.Skipped++
 			} else {
 				result.Failed++
@@ -408,13 +495,12 @@ func (sm *SyncManager) SyncCommandsWithOptions(ctx context.Context, opts SyncOpt
 
 	result.Duration = time.Since(start)
 
-	// Update metadata
-	meta := &Metadata{
-		LastSync:   time.Now(),
-		TotalPages: result.Downloaded,
-		Platforms:  []string{PlatformCommon, PlatformLinux, PlatformMacOS, PlatformWindows},
-	}
-	if err := sm.storage.SaveMetadata(meta); err != nil {
+	if err := sm.saveSyncMetadata([]string{
+		PlatformCommon,
+		PlatformLinux,
+		PlatformMacOS,
+		PlatformWindows,
+	}); err != nil {
 		sm.log.Warn("failed to save metadata", "error", err)
 	}
 
@@ -449,32 +535,165 @@ func (sm *SyncManager) SyncCommandsBatch(ctx context.Context, commands []string,
 
 		totalResult.Downloaded += result.Downloaded
 		totalResult.Failed += result.Failed
+		totalResult.Skipped += result.Skipped
 		totalResult.Errors = append(totalResult.Errors, result.Errors...)
 	}
 
 	totalResult.Duration = time.Since(start)
 
-	// Update metadata
-	meta := &Metadata{
-		LastSync:   time.Now(),
-		TotalPages: totalResult.Downloaded,
-		Platforms:  []string{PlatformCommon, PlatformLinux, PlatformMacOS, PlatformWindows},
-	}
-	if err := sm.storage.SaveMetadata(meta); err != nil {
+	if err := sm.saveSyncMetadata([]string{
+		PlatformCommon,
+		PlatformLinux,
+		PlatformMacOS,
+		PlatformWindows,
+	}); err != nil {
 		sm.log.Warn("failed to save metadata", "error", err)
 	}
 
 	return totalResult, nil
 }
 
+// UpdateStalePages refreshes stored pages older than maxAge without re-syncing
+// the entire database.
+func (sm *SyncManager) UpdateStalePages(ctx context.Context, maxAge time.Duration, opts SyncOptions) (*SyncResult, error) {
+	start := time.Now()
+	stalePages, err := sm.storage.ListStalePages(maxAge, 0)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list stale pages: %w", err)
+	}
+	if len(stalePages) == 0 {
+		return &SyncResult{Duration: time.Since(start)}, nil
+	}
+
+	if opts.Offline {
+		return sm.SyncAllWithOptions(ctx, SyncOptions{
+			Commands: uniqueCommandsFromPageRefs(stalePages),
+			Offline:  true,
+		})
+	}
+
+	result := &SyncResult{}
+	totalPages := int64(len(stalePages))
+	var currentCount int64
+
+	tasks := make([]func(context.Context) error, len(stalePages))
+	for i, ref := range stalePages {
+		pageRef := ref
+		tasks[i] = func(ctx context.Context) error {
+			err := sm.syncPageRef(ctx, pageRef)
+
+			current := atomic.AddInt64(&currentCount, 1)
+			if opts.OnProgress != nil {
+				opts.OnProgress(int(current), int(totalPages), pageRef.Name)
+			}
+
+			return err
+		}
+	}
+
+	workers := opts.Concurrency
+	if workers <= 0 {
+		workers = runtime.NumCPU() * 2
+	}
+
+	results, mapErr := concurrency.Map(ctx, tasks, func(fn func(context.Context) error) (error, error) {
+		return fn(ctx), nil
+	}, workers)
+	if mapErr != nil {
+		sm.log.Warn("some update operations failed", "error", mapErr)
+	}
+
+	for i, res := range results {
+		if res != nil {
+			if errors.Is(res, errPageNotFound) {
+				result.Skipped++
+				continue
+			}
+
+			result.Failed++
+			result.Errors = append(result.Errors, fmt.Errorf("%s/%s/%s: %w", stalePages[i].Language, stalePages[i].Platform, stalePages[i].Name, res))
+			sm.log.Warn("failed to update stale page",
+				"language", stalePages[i].Language,
+				"platform", stalePages[i].Platform,
+				"command", stalePages[i].Name,
+				"error", res,
+			)
+			continue
+		}
+
+		result.Downloaded++
+	}
+
+	result.Duration = time.Since(start)
+
+	if err := sm.saveSyncMetadata([]string{
+		PlatformCommon,
+		PlatformLinux,
+		PlatformMacOS,
+		PlatformWindows,
+		PlatformAndroid,
+		PlatformFreeBSD,
+		PlatformNetBSD,
+		PlatformOpenBSD,
+		PlatformSunOS,
+	}); err != nil {
+		sm.log.Warn("failed to save metadata", "error", err)
+	}
+
+	sm.log.Info("stale page update completed",
+		"updated", result.Downloaded,
+		"skipped", result.Skipped,
+		"failed", result.Failed,
+		"duration", result.Duration,
+	)
+
+	return result, nil
+}
+
 // syncCommand syncs a single command
-func (sm *SyncManager) syncCommand(ctx context.Context, command string) error {
+func (sm *SyncManager) syncCommand(ctx context.Context, command string, force bool) error {
+	command = strings.ToLower(strings.TrimSpace(command))
+	if command == "" {
+		return fmt.Errorf("%w for command: %s", errPageNotFound, command)
+	}
+
+	lang := sm.client.language
+	if lang == "" {
+		lang = "en"
+	}
+	if !force && sm.storage != nil && sm.storage.PageExistsAnyPlatform(command, lang) {
+		return errPageAlreadyCached
+	}
+
 	page, err := sm.client.GetPageAnyPlatform(ctx, command)
 	if err != nil {
 		return err
 	}
 
 	return sm.storage.SavePage(page)
+}
+
+func (sm *SyncManager) syncPageRef(ctx context.Context, ref PageRef) error {
+	client := sm.newSyncClientForLanguage(ref.Language)
+
+	page, err := client.GetPage(ctx, ref.Name, ref.Platform)
+	if err != nil {
+		return err
+	}
+
+	return sm.storage.SavePage(page)
+}
+
+func (sm *SyncManager) newSyncClientForLanguage(language string) *Client {
+	client := NewClient(
+		WithHTTPClient(sm.client.httpClient),
+		WithLanguage(language),
+		WithAutoDetect(sm.client.autoDetect),
+	)
+	client.baseURL = sm.client.baseURL
+	client.cacheInMemory = false
+	client.SetOfflineMode(sm.client.IsOfflineMode())
+	return client
 }
 
 // SyncPlatforms syncs commands for specific platforms concurrently
@@ -539,15 +758,29 @@ func (sm *SyncManager) getPlatformCommands(ctx context.Context, platform string)
 }
 
 // SyncPopular syncs popular/common commands
-// We overwrite this to enforce complete download, solving "page not found" errors
 func (sm *SyncManager) SyncPopular(ctx context.Context) (*SyncResult, error) {
-	sm.log.Info("SyncPopular was requested, upgrading to full sync for better offline support")
-	return sm.SyncAll(ctx)
+	return sm.SyncPopularWithOptions(ctx, SyncOptions{})
+}
+
+// SyncPopularWithOptions syncs a curated set of common commands. It prefers a
+// local TLDR checkout when available and falls back to per-command remote fetches.
+func (sm *SyncManager) SyncPopularWithOptions(ctx context.Context, opts SyncOptions) (*SyncResult, error) {
+	if len(opts.Commands) == 0 {
+		opts.Commands = getDefaultCommands()
+	}
+
+	if root, ok := findLocalSyncRoot(); ok {
+		sm.log.Info("syncing popular commands from local tldr directory", "path", root, "commands", len(opts.Commands))
+		return sm.syncFromLocalDir(ctx, root, commandSet(opts.Commands))
+	}
+
+	sm.log.Info("syncing curated popular commands", "commands", len(opts.Commands))
+	return sm.SyncCommandsWithOptions(ctx, opts)
 }
 
 // UpdateCommand updates a single command in local storage
 func (sm *SyncManager) UpdateCommand(ctx context.Context, command string) error {
-	return sm.syncCommand(ctx, command)
+	return sm.syncCommand(ctx, command, true)
 }
 
 // IsStale checks if the local database is stale
@@ -576,7 +809,7 @@ func (sm *SyncManager) AutoSync(ctx context.Context, maxAge time.Duration) (*Syn
 	}
 
 	sm.log.Info("local database is stale, syncing...")
-	return sm.SyncPopular(ctx)
+	return sm.UpdateStalePages(ctx, maxAge, SyncOptions{ForceUpdate: true})
 }
 
 // SyncWithProgress syncs with progress reporting
@@ -586,4 +819,18 @@ func (sm *SyncManager) SyncWithProgress(ctx context.Context, commands []string, 
 		OnProgress: onProgress,
 	}
 	return sm.SyncCommandsWithOptions(ctx, opts)
+}
+
+func (sm *SyncManager) saveSyncMetadata(platforms []string) error {
+	totalPages, err := sm.storage.CountPages()
+	if err != nil {
+		return err
+	}
+
+	meta := &Metadata{
+		LastSync:   time.Now(),
+		TotalPages: totalPages,
+		Platforms:  platforms,
+	}
+	return sm.storage.SaveMetadata(meta)
 }

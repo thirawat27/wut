@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -16,6 +15,7 @@ import (
 
 	"wut/internal/config"
 	"wut/internal/logger"
+	"wut/internal/shell"
 	"wut/internal/ui"
 )
 
@@ -49,7 +49,7 @@ func init() {
 	rootCmd.AddCommand(initCmd)
 
 	initCmd.Flags().BoolVarP(&initQuick, "quick", "q", false, "quick setup with defaults (non-interactive)")
-	initCmd.Flags().StringVarP(&initShell, "shell", "s", "", "shell type (bash, zsh, fish, powershell)")
+	initCmd.Flags().StringVarP(&initShell, "shell", "s", "", "shell type")
 	initCmd.Flags().BoolVar(&initSkipTLDR, "skip-tldr", false, "skip TLDR pages setup")
 	initCmd.Flags().BoolVar(&initSkipShell, "skip-shell", false, "skip shell integration setup")
 	initCmd.Flags().BoolVar(&initNonTUI, "no-tui", false, "use simple text interface (no fancy UI)")
@@ -103,6 +103,10 @@ func askChoice(prompt string, defaultVal string) string {
 func runInit(cmd *cobra.Command, args []string) error {
 	log := logger.With("init")
 	log.Info("starting initialization wizard")
+
+	if _, err := config.Load(cfgFile); err != nil {
+		return fmt.Errorf("failed to load config: %w", err)
+	}
 
 	// ─── Interrupt handling ────────────────────────────────────────────────────
 	osSig := make(chan os.Signal, 1)
@@ -260,6 +264,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// ─── Step 3: Shell Integration (auto-install, merged from 'wut install') ──
 	if !initSkipShell {
+		activeShell := shell.DetectCurrentShell()
 		shellType := initShell
 		if shellType == "" {
 			shellType = detectShellForInit()
@@ -267,12 +272,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 		if !initQuick {
 			printStep("🐚", "Shell Integration")
-			fmt.Printf("    Detected active shell: %s\n\n", valFmt(shellType))
+			displayShell := shellType
+			if activeShell != "" {
+				displayShell = activeShell
+			}
+			fmt.Printf("    Detected active shell: %s\n", valFmt(displayShell))
+			if activeShell != "" && shellType != "" && activeShell != shellType {
+				fmt.Printf("    %s\n", lipgloss.NewStyle().Foreground(cGray).Render("Falling back to installable shell target: "+shellType))
+			}
+			fmt.Println()
 			fmt.Printf("    %s\n\n", lipgloss.NewStyle().Foreground(cGray).Render("Installing key bindings, command-not-found hooks, and pro-tips..."))
 		}
 
 		// Auto-install shell integration (replaces separate 'wut install' step)
 		if err := installShellIntegration(shellType); err != nil {
+			if initQuick {
+				fmt.Printf("Shell integration skipped: %v\n", err)
+			}
 			if !initQuick {
 				if err.Error() == "already installed" {
 					printOK("Shell hooks already installed")
@@ -283,9 +299,9 @@ func runInit(cmd *cobra.Command, args []string) error {
 		} else {
 			if !initQuick {
 				printOK("Hooks installed successfully")
-				reloadCmd := "source " + getShellRcFile(shellType)
-				if shellType == "powershell" || shellType == "pwsh" {
-					reloadCmd = ". " + getShellRcFile(shellType)
+				reloadCmd := shell.GetReloadCommand(shellType, getShellRcFile(shellType))
+				if reloadCmd == "" {
+					reloadCmd = "restart your shell"
 				}
 				fmt.Printf("      %s Type %s to apply immediately.\n",
 					lipgloss.NewStyle().Foreground(cPink).Render("→"),
@@ -369,42 +385,18 @@ func runInit(cmd *cobra.Command, args []string) error {
 // OS / Shell helpers
 
 func detectShellForInit() string {
-	sh := os.Getenv("SHELL")
-	if sh != "" {
-		switch {
-		case strings.Contains(sh, "bash"):
-			return "bash"
-		case strings.Contains(sh, "zsh"):
-			return "zsh"
-		case strings.Contains(sh, "fish"):
-			return "fish"
-		case strings.Contains(sh, "pwsh"):
-			return "pwsh"
-		}
-	}
-	if runtime.GOOS == "windows" {
-		if os.Getenv("PSModulePath") != "" {
-			return "powershell"
-		}
-		return "cmd"
+	if preferred := shell.DetectPreferredInstallShell(); preferred != "" {
+		return preferred
 	}
 	return "bash"
 }
 
 func getShellRcFile(shellType string) string {
-	home, _ := os.UserHomeDir()
-	switch shellType {
-	case "bash":
-		return home + "/.bashrc"
-	case "zsh":
-		return home + "/.zshrc"
-	case "fish":
-		return home + "/.config/fish/config.fish"
-	case "powershell", "pwsh":
-		return "$PROFILE"
-	default:
-		return home + "/.bashrc"
+	if rcFile, err := shell.GetConfigFile(shellType); err == nil && rcFile != "" {
+		return rcFile
 	}
+	home, _ := os.UserHomeDir()
+	return home + "/.bashrc"
 }
 
 func boolToEnabled(b bool) string {

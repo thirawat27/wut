@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 func init() {
@@ -44,7 +45,7 @@ func suggestShortcutCmd() *cobra.Command {
 		Example: `  wut s git
   wut s docker`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			allArgs := buildArgs(cmd, args, "suggest", []string{"raw", "quiet", "offline", "exec"})
+			allArgs := buildArgs(cmd, args, "suggest", []string{"raw", "quiet", "offline", "exec", "limit"})
 			return executeMainCommand(allArgs...)
 		},
 	}
@@ -54,6 +55,7 @@ func suggestShortcutCmd() *cobra.Command {
 	cmd.Flags().BoolP("quiet", "q", false, "quiet mode")
 	cmd.Flags().BoolP("offline", "o", false, "offline mode")
 	cmd.Flags().BoolP("exec", "e", false, "execute command")
+	cmd.Flags().IntP("limit", "l", 10, "maximum number of examples to show")
 
 	return cmd
 }
@@ -67,7 +69,7 @@ func historyShortcutCmd() *cobra.Command {
 		Example: `  wut h
   wut h --stats`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			allArgs := buildArgs(cmd, args, "history", []string{"stats", "clear", "import-shell"})
+			allArgs := buildArgs(cmd, args, "history", []string{"stats", "clear", "import-shell", "limit", "search"})
 			return executeMainCommand(allArgs...)
 		},
 	}
@@ -104,7 +106,7 @@ func aliasShortcutCmd() *cobra.Command {
 		Example: `  wut a --list
   wut a --generate`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			allArgs := buildArgs(cmd, args, "alias", []string{"list", "generate", "add", "apply"})
+			allArgs := buildArgs(cmd, args, "alias", []string{"list", "generate", "add", "apply", "name", "command"})
 			return executeMainCommand(allArgs...)
 		},
 	}
@@ -188,13 +190,18 @@ Available subcommands:
 	}
 
 	// Add subcommands
-	cmd.AddCommand(&cobra.Command{
+	syncCmd := &cobra.Command{
 		Use:   "sync [commands...]",
 		Short: "Sync command database",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeMainCommand(append([]string{"db", "sync"}, args...)...)
+			allArgs := buildArgs(cmd, args, "sync", []string{"all", "force", "offline"})
+			return executeMainCommand(append([]string{"db"}, allArgs...)...)
 		},
-	})
+	}
+	syncCmd.Flags().BoolP("all", "a", false, "sync all commands")
+	syncCmd.Flags().BoolP("force", "f", false, "force update existing pages")
+	syncCmd.Flags().Bool("offline", false, "use local TLDR source only")
+	cmd.AddCommand(syncCmd)
 
 	cmd.AddCommand(&cobra.Command{
 		Use:   "status",
@@ -212,13 +219,17 @@ Available subcommands:
 		},
 	})
 
-	cmd.AddCommand(&cobra.Command{
+	updateCmd := &cobra.Command{
 		Use:   "update",
 		Short: "Update stale pages",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return executeMainCommand("db", "update")
+			allArgs := buildArgs(cmd, args, "update", []string{"days", "offline"})
+			return executeMainCommand(append([]string{"db"}, allArgs...)...)
 		},
-	})
+	}
+	updateCmd.Flags().Int("days", 7, "update pages older than this many days")
+	updateCmd.Flags().Bool("offline", false, "use local TLDR source only")
+	cmd.AddCommand(updateCmd)
 
 	return cmd
 }
@@ -252,30 +263,46 @@ func smartShortcutCmd() *cobra.Command {
 		Example: `  wut ? "how to find large files"
   wut ? "compress folder to tar.gz"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			allArgs := buildArgs(cmd, args, "smart", []string{"exec", "correct"})
+			allArgs := buildArgs(cmd, args, "smart", []string{"exec", "correct", "limit"})
 			return executeMainCommand(allArgs...)
 		},
 	}
 
 	cmd.Flags().BoolP("exec", "e", false, "execute selected command")
 	cmd.Flags().BoolP("correct", "c", true, "auto-correct typos")
+	cmd.Flags().IntP("limit", "l", 10, "maximum suggestions to show")
 
 	return cmd
 }
 
-// buildArgs builds an argument list from the set flags
-func buildArgs(cmd *cobra.Command, args []string, command string, boolFlags []string) []string {
+// buildArgs forwards changed shortcut flags to the underlying command while
+// preserving explicit false values for bool flags and passing scalar values.
+func buildArgs(cmd *cobra.Command, args []string, command string, allowedFlags []string) []string {
 	var allArgs []string
 	allArgs = append(allArgs, command)
 
-	for _, flag := range boolFlags {
-		if cmd.Flags().Changed(flag) {
-			val, _ := cmd.Flags().GetBool(flag)
-			if val {
-				allArgs = append(allArgs, "--"+flag)
-			}
-		}
+	allowed := make(map[string]struct{}, len(allowedFlags))
+	for _, flag := range allowedFlags {
+		allowed[flag] = struct{}{}
 	}
+
+	cmd.Flags().Visit(func(flag *pflag.Flag) {
+		if _, ok := allowed[flag.Name]; !ok {
+			return
+		}
+
+		switch flag.Value.Type() {
+		case "bool":
+			val, _ := cmd.Flags().GetBool(flag.Name)
+			if val {
+				allArgs = append(allArgs, "--"+flag.Name)
+			} else {
+				allArgs = append(allArgs, "--"+flag.Name+"=false")
+			}
+		default:
+			allArgs = append(allArgs, "--"+flag.Name, flag.Value.String())
+		}
+	})
 
 	allArgs = append(allArgs, args...)
 	return allArgs

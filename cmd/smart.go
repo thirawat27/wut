@@ -78,6 +78,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 	storage := openSmartStorage(log)
 	if storage != nil {
 		defer storage.Close()
+		hydrateHistoryFromShell(context.Background(), storage)
 	}
 
 	// Check for typos if enabled
@@ -165,6 +166,12 @@ func runSmart(cmd *cobra.Command, args []string) error {
 			defer recordCancel()
 			if err := storage.AddHistory(recordCtx, recordCmd); err != nil {
 				log.Debug("failed to record history", "error", err)
+				return
+			}
+			if maxEntries := config.Get().History.MaxEntries; maxEntries > 0 {
+				if err := storage.TrimHistory(recordCtx, maxEntries); err != nil {
+					log.Debug("failed to trim history", "error", err)
+				}
 			}
 		}()
 	}

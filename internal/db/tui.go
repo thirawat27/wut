@@ -182,6 +182,19 @@ func (m *Model) SetStorage(storage *Storage) {
 	m.client.SetStorage(storage)
 }
 
+// SetInitialPage opens the TUI directly in detail mode for a preloaded page.
+func (m *Model) SetInitialPage(page *Page) {
+	if page == nil {
+		return
+	}
+
+	m.currentPage = page
+	m.mode = "detail"
+	m.selectedExample = 0
+	m.totalExamples = len(page.Examples)
+	m.viewport.SetContent(m.renderPage(page))
+}
+
 // GetExecutedCommand returns the command that should be executed
 func (m *Model) GetExecutedCommand() string {
 	return m.executedCmd
@@ -189,6 +202,9 @@ func (m *Model) GetExecutedCommand() string {
 
 // Init initializes the model
 func (m *Model) Init() tea.Cmd {
+	if m.currentPage != nil {
+		return textinput.Blink
+	}
 	return tea.Batch(
 		textinput.Blink,
 		m.loadInitialSuggestions(),
@@ -627,24 +643,7 @@ func (m *Model) tick() tea.Cmd {
 // loadInitialSuggestions loads initial command suggestions
 func (m *Model) loadInitialSuggestions() tea.Cmd {
 	return func() tea.Msg {
-		// Try local storage first
-		if m.storage != nil {
-			commands, err := m.storage.ListCommands(0)
-			if err == nil && len(commands) > 0 {
-				pages := make([]Page, len(commands))
-				for i, command := range commands {
-					pages[i] = Page{
-						Name:        command,
-						Description: fmt.Sprintf("View documentation for '%s'", command),
-						Platform:    "common",
-					}
-				}
-				return searchResultsMsg{pages: pages}
-			}
-		}
-
-		// Fall back to default list
-		commands, err := m.client.GetAvailableCommands(context.Background())
+		commands, err := m.client.FindCommandMatches(context.Background(), "", 50)
 		if err != nil {
 			return searchResultsMsg{err: err}
 		}
@@ -671,27 +670,16 @@ func (m *Model) searchCommand(query string) tea.Cmd {
 		ctx := context.Background()
 
 		if m.storage != nil {
-			commands, err := m.storage.ListCommands(0)
-			if err == nil && len(commands) > 0 {
-				var pages []Page
-				queryLower := strings.ToLower(query)
-
-				for _, command := range commands {
-					if strings.Contains(strings.ToLower(command), queryLower) {
-						pages = append(pages, Page{
-							Name:        command,
-							Description: fmt.Sprintf("View documentation for '%s'", command),
-							Platform:    "common",
-						})
-						if len(pages) >= 50 {
-							break
-						}
+			if commands, err := m.client.FindCommandMatches(ctx, query, 50); err == nil && len(commands) > 0 {
+				pages := make([]Page, len(commands))
+				for i, command := range commands {
+					pages[i] = Page{
+						Name:        command,
+						Description: fmt.Sprintf("View documentation for '%s'", command),
+						Platform:    "common",
 					}
 				}
-
-				if len(pages) > 0 {
-					return searchResultsMsg{pages: pages}
-				}
+				return searchResultsMsg{pages: pages}
 			}
 
 			storedPages, err := m.storage.SearchLocalLimited(query, 50)
@@ -708,21 +696,14 @@ func (m *Model) searchCommand(query string) tea.Cmd {
 			}
 		}
 
-		commands, _ := m.client.GetAvailableCommands(ctx)
-		var pages []Page
-		queryLower := strings.ToLower(query)
-
+		commands, _ := m.client.FindCommandMatches(ctx, query, 50)
+		pages := make([]Page, 0, len(commands))
 		for _, cmd := range commands {
-			if strings.Contains(strings.ToLower(cmd), queryLower) {
-				pages = append(pages, Page{
-					Name:        cmd,
-					Description: fmt.Sprintf("View documentation for '%s'", cmd),
-					Platform:    "common",
-				})
-				if len(pages) >= 50 {
-					break
-				}
-			}
+			pages = append(pages, Page{
+				Name:        cmd,
+				Description: fmt.Sprintf("View documentation for '%s'", cmd),
+				Platform:    "common",
+			})
 		}
 
 		if len(pages) == 0 {

@@ -155,10 +155,13 @@ func fuzzyMatch(query, target string) (bool, []int) {
 		return false, nil
 	}
 
-	// Check if all query chars exist in target
-	// Using pre-allocated stack array for small queries
-	var positions [256]int
-	posCount := 0
+	// Use a stack-backed slice for small queries and grow dynamically for long
+	// queries to avoid panics on large inputs while keeping the fast path cheap.
+	var positionsBuf [256]int
+	positions := positionsBuf[:0]
+	if len(query) > len(positionsBuf) {
+		positions = make([]int, 0, len(query))
+	}
 
 	targetIdx := 0
 	for i := 0; i < len(query); i++ {
@@ -168,10 +171,7 @@ func fuzzyMatch(query, target string) (bool, []int) {
 		found := false
 		for targetIdx < len(target) {
 			if target[targetIdx] == qc {
-				if posCount < len(positions) {
-					positions[posCount] = targetIdx
-				}
-				posCount++
+				positions = append(positions, targetIdx)
 				targetIdx++
 				found = true
 				break
@@ -185,8 +185,8 @@ func fuzzyMatch(query, target string) (bool, []int) {
 	}
 
 	// Copy positions to slice
-	result := make([]int, posCount)
-	copy(result, positions[:posCount])
+	result := make([]int, len(positions))
+	copy(result, positions)
 	return true, result
 }
 

@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbletea"
@@ -63,9 +62,6 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 		log.Debug("suggest completed", "duration", time.Since(start))
 	}()
 
-	// Load configuration
-	cfg := config.Get()
-
 	// Get query from args or enter interactive mode
 	query := ""
 	if len(args) > 0 {
@@ -104,7 +100,10 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 	client := db.NewClient(clientOpts...)
 
 	// Interactive mode - launch TUI
-	if query == "" && !suggestRaw {
+	if query == "" {
+		if suggestRaw || suggestQuiet {
+			return runCommandIndexMode(client)
+		}
 		return runInteractiveMode(client, storage)
 	}
 
@@ -114,7 +113,7 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 	}
 
 	// Normal mode with TUI for specific command
-	return runCommandMode(client, query, cfg)
+	return runCommandMode(client, storage, query)
 }
 
 // runInteractiveMode runs the interactive TUI mode
@@ -172,16 +171,7 @@ func runRawMode(client *db.Client, query string) error {
 
 	page, err := client.GetPageAnyPlatform(ctx, query)
 	if err != nil {
-		// Try to find similar commands
-		commands, _ := client.GetAvailableCommands(ctx)
-		var suggestions []string
-		queryLower := strings.ToLower(query)
-
-		for _, cmd := range commands {
-			if strings.Contains(strings.ToLower(cmd), queryLower) {
-				suggestions = append(suggestions, cmd)
-			}
-		}
+		suggestions, _ := client.FindCommandMatches(ctx, query, 5)
 
 		if len(suggestions) > 0 {
 			fmt.Printf("Command '%s' not found. Did you mean:\n", query)
@@ -225,22 +215,80 @@ func runRawMode(client *db.Client, query string) error {
 	return nil
 }
 
+func runCommandIndexMode(client *db.Client) error {
+	ctx := context.Background()
+	commands, err := client.FindCommandMatches(ctx, "", suggestLimit)
+	if err != nil {
+		return err
+	}
+
+	if suggestQuiet {
+		for _, command := range commands {
+			fmt.Println(command)
+		}
+		return nil
+	}
+
+	fmt.Println("# Available commands")
+	fmt.Println()
+	for _, command := range commands {
+		fmt.Printf("- `%s`\n", command)
+	}
+
+	return nil
+}
+
 // runCommandMode runs with TUI for a specific command
-func runCommandMode(client *db.Client, query string, cfg *config.Config) error {
+func runCommandMode(client *db.Client, storage *db.Storage, query string) error {
 	ctx := context.Background()
 
 	page, err := client.GetPageAnyPlatform(ctx, query)
 	if err != nil {
 		fmt.Printf("Command not found: %s\n", query)
+		if suggestions, _ := client.FindCommandMatches(ctx, query, 5); len(suggestions) > 0 {
+			fmt.Println("Did you mean:")
+			for _, suggestion := range suggestions {
+				fmt.Printf("  - %s\n", suggestion)
+			}
+		}
 		if client.IsOfflineMode() || !client.IsOnline(ctx) {
 			fmt.Println("📴 Run 'wut db sync' to download the database")
 		}
 		return nil
 	}
 
+	if suggestExec {
+		return runDetailMode(client, storage, page)
+	}
+
 	// Render with lipgloss
 	output := db.FormatPage(page)
 	fmt.Println(output)
+
+	return nil
+}
+
+func runDetailMode(client *db.Client, storage *db.Storage, page *db.Page) error {
+	model := db.NewModel()
+	if storage != nil {
+		model.SetStorage(storage)
+	}
+	model.SetInitialPage(page)
+
+	program := tea.NewProgram(model, tea.WithAltScreen())
+	finalModel, err := program.Run()
+	if err != nil {
+		return fmt.Errorf("TUI error: %w", err)
+	}
+
+	if m, ok := finalModel.(*db.Model); ok {
+		if cmd := m.GetExecutedCommand(); cmd != "" {
+			fmt.Printf("\n⚡ Executing: %s\n\n", cmd)
+			if err := db.ExecuteCommand(cmd); err != nil {
+				return fmt.Errorf("execution failed: %w", err)
+			}
+		}
+	}
 
 	return nil
 }

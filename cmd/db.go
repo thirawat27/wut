@@ -30,6 +30,9 @@ var (
 	dbSyncAll bool
 	dbForce   bool
 	dbOffline bool
+
+	dbUpdateDays    int
+	dbUpdateOffline bool
 )
 
 // dbSyncCmd represents the sync subcommand
@@ -43,7 +46,8 @@ Use --all to sync all available commands.`,
 	Example: `  wut db sync                    # Sync popular commands
   wut db sync git docker npm     # Sync specific commands
   wut db sync --all              # Sync all commands (may take a while)
-  wut db sync --force            # Force update existing pages`,
+  wut db sync --force            # Force update existing pages
+  wut db sync --offline git      # Import from local tldr-main checkout only`,
 	RunE: runDBSync,
 }
 
@@ -69,7 +73,10 @@ var dbUpdateCmd = &cobra.Command{
 	Short: "Update stale command pages",
 	Long: `Check for and update stale command pages in the local database.
 
-By default, updates pages older than 7 days.`,
+By default, uses tldr.auto_sync_interval (7 days unless configured).`,
+	Example: `  wut db update
+  wut db update --days 3
+  wut db update --offline`,
 	RunE: runDBUpdate,
 }
 
@@ -84,7 +91,11 @@ func init() {
 	// Sync flags
 	dbSyncCmd.Flags().BoolVarP(&dbSyncAll, "all", "a", false, "sync all commands (may take a while)")
 	dbSyncCmd.Flags().BoolVarP(&dbForce, "force", "f", false, "force update existing pages")
-	dbSyncCmd.Flags().BoolVar(&dbOffline, "offline", false, "work in offline mode")
+	dbSyncCmd.Flags().BoolVar(&dbOffline, "offline", false, "sync from local TLDR source only (no network)")
+
+	// Update flags
+	dbUpdateCmd.Flags().IntVar(&dbUpdateDays, "days", 7, "update pages older than this many days")
+	dbUpdateCmd.Flags().BoolVar(&dbUpdateOffline, "offline", false, "update from local TLDR source only (no network)")
 }
 
 func runDBSync(cmd *cobra.Command, args []string) error {
@@ -101,18 +112,23 @@ func runDBSync(cmd *cobra.Command, args []string) error {
 	// Create sync manager
 	syncManager := db.NewSyncManager(storage)
 
-	_ = os.Setenv("WUT_NO_SPINNER", "true") // Just a placeholder, we use spinner locally below
 	ctx := context.Background()
 	var result *db.SyncResult
 
 	err = ui.RunWithSpinner("Syncing command database...", func() error {
 		var syncErr error
+		opts := db.SyncOptions{
+			Commands:    args,
+			ForceUpdate: dbForce,
+			Offline:     dbOffline,
+		}
+
 		if dbSyncAll {
-			result, syncErr = syncManager.SyncAll(ctx)
+			result, syncErr = syncManager.SyncAllWithOptions(ctx, opts)
 		} else if len(args) > 0 {
-			result, syncErr = syncManager.SyncCommands(ctx, args)
+			result, syncErr = syncManager.SyncCommandsWithOptions(ctx, opts)
 		} else {
-			result, syncErr = syncManager.SyncPopular(ctx)
+			result, syncErr = syncManager.SyncPopularWithOptions(ctx, opts)
 		}
 		return syncErr
 	})
@@ -152,6 +168,23 @@ func runDBStatus(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("failed to get stats: %w", err)
 	}
+
+	autoSyncDays := config.Get().TLDR.AutoSyncInterval
+	if autoSyncDays <= 0 {
+		autoSyncDays = 7
+	}
+	stalePages, err := storage.ListStalePages(time.Duration(autoSyncDays)*24*time.Hour, 0)
+	if err != nil {
+		return fmt.Errorf("failed to inspect stale pages: %w", err)
+	}
+	fileInfo, err := os.Stat(dbPath)
+	if err != nil {
+		return fmt.Errorf("failed to stat database: %w", err)
+	}
+	stats["db_path"] = dbPath
+	stats["db_size_bytes"] = fileInfo.Size()
+	stats["stale_pages"] = len(stalePages)
+	stats["stale_threshold_days"] = autoSyncDays
 
 	// Display status
 	fmt.Println(formatStatus(stats))
@@ -208,25 +241,45 @@ func runDBUpdate(cmd *cobra.Command, args []string) error {
 	syncManager := db.NewSyncManager(storage)
 
 	ctx := context.Background()
+	updateDays := dbUpdateDays
+	if !cmd.Flags().Changed("days") {
+		if configuredDays := config.Get().TLDR.AutoSyncInterval; configuredDays > 0 {
+			updateDays = configuredDays
+		}
+	}
+	if updateDays <= 0 {
+		return fmt.Errorf("--days must be greater than 0")
+	}
+	maxAge := time.Duration(updateDays) * 24 * time.Hour
 
-	// Check if stale
-	if !syncManager.IsStale(7 * 24 * time.Hour) {
-		lastSync, _ := syncManager.GetLastSync()
-		fmt.Printf("✅ Database is up to date (last sync: %s)\n", lastSync.Format("2006-01-02"))
+	totalPages, err := storage.CountPages()
+	if err != nil {
+		return fmt.Errorf("failed to inspect database: %w", err)
+	}
+	if totalPages == 0 {
+		fmt.Println("ℹ️  Database is empty")
+		fmt.Println()
+		fmt.Println("Run 'wut db sync' to download command pages first")
 		return nil
 	}
 
-	// Auto sync
 	var result *db.SyncResult
 
 	err = ui.RunWithSpinner("Updating stale pages...", func() error {
 		var syncErr error
-		result, syncErr = syncManager.AutoSync(ctx, 7*24*time.Hour)
+		result, syncErr = syncManager.UpdateStalePages(ctx, maxAge, db.SyncOptions{
+			Offline: dbUpdateOffline,
+		})
 		return syncErr
 	})
 
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)
+	}
+
+	if result.Downloaded == 0 && result.Failed == 0 && result.Skipped == 0 {
+		fmt.Printf("✅ No stale pages older than %d days found\n", updateDays)
+		return nil
 	}
 
 	fmt.Println()
@@ -259,6 +312,7 @@ func formatSyncResult(result *db.SyncResult) string {
 		color string
 	}{
 		{"Downloaded", result.Downloaded, "#10B981"},
+		{"Skipped", result.Skipped, "#F59E0B"},
 		{"Failed", result.Failed, "#EF4444"},
 	}
 
@@ -322,11 +376,36 @@ func formatStatus(stats map[string]any) string {
 		Render(fmt.Sprintf("  Total Pages: %d", totalPages)))
 	b.WriteString("\n")
 
+	if stalePages, ok := stats["stale_pages"].(int); ok {
+		days := 7
+		if v, ok := stats["stale_threshold_days"].(int); ok && v > 0 {
+			days = v
+		}
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F59E0B")).
+			Render(fmt.Sprintf("  Stale Pages (> %d days): %d", days, stalePages)))
+		b.WriteString("\n")
+	}
+
 	// Last sync
 	if lastSync, ok := stats["last_sync"].(time.Time); ok {
 		b.WriteString(lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#3B82F6")).
 			Render(fmt.Sprintf("  Last Sync: %s", lastSync.Format("2006-01-02 15:04"))))
+		b.WriteString("\n")
+	}
+
+	if sizeBytes, ok := stats["db_size_bytes"].(int64); ok {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#10B981")).
+			Render(fmt.Sprintf("  Database Size: %s", formatBytes(sizeBytes))))
+		b.WriteString("\n")
+	}
+
+	if dbPath, ok := stats["db_path"].(string); ok && dbPath != "" {
+		b.WriteString(lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6B7280")).
+			Render(fmt.Sprintf("  Path: %s", dbPath)))
 		b.WriteString("\n")
 	}
 
@@ -347,4 +426,20 @@ func formatStatus(stats map[string]any) string {
 	}
 
 	return b.String()
+}
+
+func formatBytes(size int64) string {
+	const unit = int64(1024)
+	if size < unit {
+		return fmt.Sprintf("%d B", size)
+	}
+
+	div, exp := unit, 0
+	for n := size / unit; n >= unit && exp < 4; n /= unit {
+		div *= unit
+		exp++
+	}
+
+	suffixes := []string{"KB", "MB", "GB", "TB", "PB"}
+	return fmt.Sprintf("%.1f %s", float64(size)/float64(div), suffixes[exp])
 }

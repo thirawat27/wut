@@ -5,7 +5,7 @@ Thank you for your interest in contributing to WUT! This document provides guide
 ## 🚀 Getting Started
 
 ### Prerequisites
-- Go 1.25.0 or higher
+- Go 1.26.0 or higher
 - Git
 - Make (optional, for using Makefile commands)
 
@@ -52,6 +52,9 @@ git checkout -b fix/your-bug-fix
 # Run all tests
 go test ./...
 
+# Run static checks
+go vet ./...
+
 # Run tests with coverage
 go test -cover ./...
 
@@ -59,7 +62,7 @@ go test -cover ./...
 go test -race ./...
 
 # Run specific package tests
-go test ./internal/ai/...
+go test ./internal/db/...
 ```
 
 ### 4. Run Linters
@@ -155,11 +158,11 @@ func BenchmarkFunctionName(b *testing.B) {
 wut/
 ├── cmd/           # CLI commands
 ├── internal/      # Private application code
-│   ├── ai/        # AI/ML functionality
+│   ├── db/        # TLDR cache and command storage
 │   ├── config/    # Configuration management
-│   ├── core/      # Core functionality
+│   ├── performance/ # Matchers, caches, worker helpers
+│   ├── smart/     # Smart suggestion engine
 │   └── ...
-├── pkg/           # Public libraries
 └── main.go        # Application entry point
 ```
 
@@ -188,6 +191,9 @@ if err != nil {
 1. Check existing issues to avoid duplicates
 2. Verify the bug exists in the latest version
 3. Collect relevant information (OS, Go version, error messages)
+4. For user-facing CLI issues, include `wut bug-report` output after reviewing it for secrets
+
+Security vulnerabilities should not be filed as public issues. Follow [SECURITY.md](SECURITY.md) for private reporting.
 
 ### Bug Report Template
 ```markdown
@@ -246,6 +252,7 @@ func ParseCommand(input string) (*ParsedCommand, error) {
 - Update README.md for user-facing changes
 - Add examples for new features
 - Keep installation instructions current
+- Update SECURITY.md when disclosure/reporting guidance changes
 
 ## 🔍 Code Review Process
 

@@ -192,7 +192,7 @@ The initialization process will:
 1. Create configuration directories
 2. Set up your preferred theme
 3. Detect and configure shell integration
-4. Optionally download command database for offline use
+4. Optionally download a curated offline command database with `wut db sync`
 
 ### Shell Integration
 
@@ -254,7 +254,7 @@ WUT provides convenient shortcuts for faster typing:
 | `wut x` | `wut explain` | Explain a command |
 | `wut a` | `wut alias` | Manage aliases |
 | `wut c` | `wut config` | Manage configuration |
-| `wut t` | `wut db` | Database management |
+| `wut d` | `wut db` | Database management |
 | `wut f` | `wut fix` | Fix command typos |
 | `wut ?` | `wut smart` | Smart suggestions |
 | `wut b` | `wut bookmark` | Manage bookmarks |
@@ -471,27 +471,32 @@ wut config --import backup.yaml
 Manage the command database for offline use.
 
 ```bash
-# Download popular commands
+# Download a curated set of popular commands
 wut db sync
-wut t sync
+wut d sync
 
 # Download specific commands
 wut db sync git docker npm kubectl
 
-# Download all available commands (may take a while)
+# Download the full TLDR catalog (may take a while)
 wut db sync --all
 
 # Force update existing pages
 wut db sync --force
 wut db sync git --force
 
-# Check database status
+# Import only from a local tldr-main checkout (no network)
+wut db sync --offline git
+
+# Check database status, stale pages, and DB size
 wut db status
 
-# Update existing database
+# Update pages older than the configured sync interval (7 days by default)
 wut db update
+wut db update --days 3
+wut db update --offline
 
-# Clear local database
+# Clear local database and reset sync metadata
 wut db clear
 ```
 
@@ -594,6 +599,8 @@ WUT stores its configuration in:
 - **Windows**: `%USERPROFILE%\.config\wut\config.yaml`
 - **XDG**: `$XDG_CONFIG_HOME/wut/config.yaml`
 
+The primary WUT database is `wut.db`. The TLDR cache lives next to it as `tldr.db`.
+
 ### Available Configuration Options
 
 | Key | Type | Default | Description |
@@ -615,7 +622,7 @@ WUT stores its configuration in:
 | `history.track_context` | bool | `true` | Track command context |
 | `history.track_timing` | bool | `true` | Track command timing |
 | `database.type` | string | `bbolt` | Database type |
-| `database.path` | string | `~/.wut/data` | Database file path |
+| `database.path` | string | `~/.config/wut/wut.db` | Primary WUT database file path |
 | `database.max_size` | int | `100` | Max database size (MB) |
 | `database.backup_enabled` | bool | `true` | Enable backups |
 | `database.backup_interval` | int | `24` | Backup interval (hours) |
@@ -632,7 +639,7 @@ WUT stores its configuration in:
 | `context.environment_vars` | bool | `true` | Track environment variables |
 | `context.directory_analysis` | bool | `true` | Analyze directories |
 | `logging.level` | string | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `logging.file` | string | `~/.wut/logs/wut.log` | Log file path |
+| `logging.file` | string | `~/.config/wut/logs/wut.log` | Log file path |
 | `logging.max_size` | int | `10` | Max log size (MB) |
 | `logging.max_backups` | int | `5` | Max log backups |
 | `logging.max_age` | int | `30` | Max log age (days) |
@@ -669,7 +676,7 @@ history:
 
 logging:
   level: info
-  file: ~/.wut/logs/wut.log
+  file: ~/.config/wut/logs/wut.log
   max_size: 10
   max_backups: 5
   max_age: 30
@@ -691,7 +698,7 @@ context:
 
 database:
   type: bbolt
-  path: ~/.wut/data
+  path: ~/.config/wut/wut.db
   max_size: 100
   backup_enabled: true
   backup_interval: 24
@@ -837,15 +844,21 @@ source ~/.zshrc   # Zsh
 #### Database Not Found
 
 ```bash
-# Download command database
+# Download popular offline pages
 wut db sync
 
-# Check status
+# Check status, stale pages, and file size
 wut db status
 
-# Force re-download
+# Force re-download the full catalog
 wut db clear
 wut db sync --all
+```
+
+For a network-free import, place a TLDR checkout in `./tldr-main` (or `./tldr-main/tldr-main`) and run:
+
+```bash
+wut db sync --offline
 ```
 
 #### Configuration Reset
@@ -882,16 +895,20 @@ wut config --set logging.level --value debug
 - **Bug Reports**: [GitHub Issues](https://github.com/thirawat27/wut/issues)
 - **Feature Requests**: [GitHub Issues](https://github.com/thirawat27/wut/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/thirawat27/wut/discussions)
+- **Security Reports**: Follow [SECURITY.md](SECURITY.md) for private disclosure
 
 
 
 ## Security and Privacy
 
 - All processing runs locally on your machine
-- No data is sent to external servers
+- Command history and local databases stay on your machine
+- TLDR sync/download features fetch public documentation from upstream sources when online
 - Command history stored locally in BBolt database
 - Optional encryption for sensitive data
 - Open source - audit the code yourself
+- Security issues should be reported privately first as described in [SECURITY.md](SECURITY.md)
+- For non-security diagnostics, run `wut bug-report` and review the output before sharing it
 
 ## Contributing
 

@@ -4,6 +4,7 @@ package cmd
 import (
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -542,9 +543,10 @@ type configField struct {
 
 var configFieldMap = map[string]configField{
 	// App
-	"app.name":    {[]int{0, 0}, "string", setString},
-	"app.version": {[]int{0, 1}, "string", setString},
-	"app.debug":   {[]int{0, 2}, "bool", setBool},
+	"app.name":        {[]int{0, 0}, "string", setString},
+	"app.version":     {[]int{0, 1}, "string", setString},
+	"app.debug":       {[]int{0, 2}, "bool", setBool},
+	"app.initialized": {[]int{0, 3}, "bool", setBool},
 	// Fuzzy
 	"fuzzy.enabled":        {[]int{1, 0}, "bool", setBool},
 	"fuzzy.case_sensitive": {[]int{1, 1}, "bool", setBool},
@@ -626,6 +628,30 @@ var configFieldMap = map[string]configField{
 	"tldr.defaultPlatform":    {[]int{9, 6}, "string", setString},
 }
 
+var configCustomGetters = map[string]func(any) (any, error){
+	"shell.hooks.bash":       getShellHook("bash"),
+	"shell.hooks.zsh":        getShellHook("zsh"),
+	"shell.hooks.fish":       getShellHook("fish"),
+	"shell.hooks.powershell": getShellHook("powershell"),
+	"shell.hooks.pwsh":       getShellHook("pwsh"),
+	"shell.hooks.cmd":        getShellHook("cmd"),
+	"shell.hooks.nushell":    getShellHook("nushell"),
+	"shell.hooks.xonsh":      getShellHook("xonsh"),
+	"shell.hooks.elvish":     getShellHook("elvish"),
+}
+
+var configCustomSetters = map[string]func(any, string) error{
+	"shell.hooks.bash":       setShellHook("bash"),
+	"shell.hooks.zsh":        setShellHook("zsh"),
+	"shell.hooks.fish":       setShellHook("fish"),
+	"shell.hooks.powershell": setShellHook("powershell"),
+	"shell.hooks.pwsh":       setShellHook("pwsh"),
+	"shell.hooks.cmd":        setShellHook("cmd"),
+	"shell.hooks.nushell":    setShellHook("nushell"),
+	"shell.hooks.xonsh":      setShellHook("xonsh"),
+	"shell.hooks.elvish":     setShellHook("elvish"),
+}
+
 // Setter functions
 func setString(v reflect.Value, s string) error {
 	if v.Kind() != reflect.String {
@@ -674,13 +700,17 @@ func getConfigValue(key string) (any, error) {
 	key = strings.ToLower(strings.TrimSpace(key))
 	key = strings.ReplaceAll(key, " ", ".")
 
+	cfg := config.Get()
+	if getter, ok := configCustomGetters[key]; ok {
+		return getter(cfg)
+	}
+
 	field, ok := configFieldMap[key]
 	if !ok {
 		// Try to find with alternative key formats
 		return nil, fmt.Errorf("unknown config key: %s\nUse 'wut config --list' to see available keys", key)
 	}
 
-	cfg := config.Get()
 	v := reflect.ValueOf(cfg).Elem()
 
 	// Navigate to the field
@@ -700,12 +730,19 @@ func setConfigValue(key, value string) error {
 	key = strings.ToLower(strings.TrimSpace(key))
 	key = strings.ReplaceAll(key, " ", ".")
 
+	cfg := config.Get()
+	if setter, ok := configCustomSetters[key]; ok {
+		if err := setter(cfg, value); err != nil {
+			return fmt.Errorf("failed to set %s: %w", key, err)
+		}
+		return config.Save()
+	}
+
 	field, ok := configFieldMap[key]
 	if !ok {
 		return fmt.Errorf("unknown config key: %s\nUse 'wut config --list' to see available keys", key)
 	}
 
-	cfg := config.Get()
 	v := reflect.ValueOf(cfg).Elem()
 
 	// Navigate to the field
@@ -735,6 +772,7 @@ func listConfigKeys() error {
 		"database": {},
 		"history":  {},
 		"context":  {},
+		"shell":    {},
 		"privacy":  {},
 		"logging":  {},
 		"tldr":     {},
@@ -742,21 +780,33 @@ func listConfigKeys() error {
 
 	for key := range configFieldMap {
 		parts := strings.Split(key, ".")
-		if len(parts) == 2 {
+		if len(parts) >= 2 {
 			group := parts[0]
 			if _, ok := groups[group]; ok {
-				// Only add snake_case keys
-				if !strings.Contains(parts[1], "C") && !strings.Contains(parts[1], "D") {
+				if key == strings.ToLower(key) && !strings.Contains(key, "Camel") {
 					groups[group] = append(groups[group], key)
 				}
 			}
 		}
 	}
 
-	for group, keys := range groups {
+	for key := range configCustomGetters {
+		parts := strings.Split(key, ".")
+		if len(parts) >= 2 {
+			group := parts[0]
+			if _, ok := groups[group]; ok {
+				groups[group] = append(groups[group], key)
+			}
+		}
+	}
+
+	groupOrder := []string{"app", "fuzzy", "ui", "database", "history", "context", "shell", "privacy", "logging", "tldr"}
+	for _, group := range groupOrder {
+		keys := groups[group]
 		if len(keys) == 0 {
 			continue
 		}
+		sort.Strings(keys)
 		fmt.Printf("  %s:\n", headerStyle.Render(group))
 		for _, key := range keys {
 			fmt.Printf("    - %s\n", key)
@@ -770,6 +820,49 @@ func listConfigKeys() error {
 	fmt.Println("  wut config --set logging.level --value debug")
 
 	return nil
+}
+
+func getShellHook(name string) func(any) (any, error) {
+	return func(cfgAny any) (any, error) {
+		cfg, ok := cfgAny.(*config.Config)
+		if !ok || cfg == nil {
+			return nil, fmt.Errorf("configuration unavailable")
+		}
+		if cfg.Shell.Hooks == nil {
+			return false, nil
+		}
+		return cfg.Shell.Hooks[name], nil
+	}
+}
+
+func setShellHook(name string) func(any, string) error {
+	return func(cfgAny any, raw string) error {
+		cfg, ok := cfgAny.(*config.Config)
+		if !ok || cfg == nil {
+			return fmt.Errorf("configuration unavailable")
+		}
+		value, err := parseBool(raw)
+		if err != nil {
+			return err
+		}
+		if cfg.Shell.Hooks == nil {
+			cfg.Shell.Hooks = make(map[string]bool)
+		}
+		cfg.Shell.Hooks[name] = value
+		return nil
+	}
+}
+
+func parseBool(s string) (bool, error) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	switch s {
+	case "true", "1", "yes", "on", "enabled":
+		return true, nil
+	case "false", "0", "no", "off", "disabled":
+		return false, nil
+	default:
+		return false, fmt.Errorf("invalid boolean: %s", s)
+	}
 }
 
 func resetConfig() error {

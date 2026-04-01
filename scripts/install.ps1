@@ -16,6 +16,12 @@
 .PARAMETER Uninstall
     Uninstall WUT via the installer's /uninstall flag.
 
+.PARAMETER NoInit
+    Skip automatic `wut init --quick`.
+
+.PARAMETER NoShell
+    Skip shell hook installation during automatic init.
+
 .PARAMETER Help
     Show this help message.
 
@@ -37,6 +43,8 @@ param(
     [string]$Version = "latest",
     [switch]$Force,
     [switch]$Uninstall,
+    [switch]$NoInit,
+    [switch]$NoShell,
     [switch]$Help
 )
 
@@ -83,6 +91,8 @@ Options:
     -Version VERSION    Install specific release tag (default: latest)
     -Force              Skip overwrite confirmation
     -Uninstall          Run installer in uninstall mode
+    -NoInit             Skip automatic `wut init --quick`
+    -NoShell            Skip shell hook installation during init
     -Help               Show this message
 
 Examples:
@@ -193,6 +203,49 @@ function Start-Setup {
     Write-Success "Setup completed successfully (exit code 0)"
 }
 
+function Find-WutBinary {
+    $candidates = @(
+        (Get-Command wut -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
+        (Join-Path $env:ProgramFiles "WUT\wut.exe"),
+        (Join-Path $env:LOCALAPPDATA "WUT\wut.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "WUT\wut.exe")
+    ) | Where-Object { $_ }
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Invoke-WutInit {
+    if ($NoInit) {
+        return
+    }
+
+    $wutPath = Find-WutBinary
+    if (-not $wutPath) {
+        Write-Warn "Installed WUT binary was not found for automatic initialization."
+        return
+    }
+
+    $args = @("init", "--quick", "--shell", "powershell")
+    if ($NoShell) {
+        $args += "--skip-shell"
+    }
+
+    Write-Info "Running first-time setup automatically..."
+    try {
+        & $wutPath @args
+        Write-Success "WUT initialized"
+    }
+    catch {
+        Write-Warn "Automatic initialization failed. Run '$wutPath init' manually if needed."
+    }
+}
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 function Main {
     if ($Help) { Show-Usage; return }
@@ -237,6 +290,10 @@ function Main {
 
         # 3. Run installer
         Start-Setup -InstallerPath $outFile -IsUninstall $Uninstall.IsPresent
+
+        if (-not $Uninstall) {
+            Invoke-WutInit
+        }
 
         # 4. Done
         if (-not $Uninstall) {

@@ -17,24 +17,24 @@ import (
 
 // Config holds all configuration for the application
 type Config struct {
-	App      AppConfig      `mapstructure:"app"`
-	Fuzzy    FuzzyConfig    `mapstructure:"fuzzy"`
-	UI       UIConfig       `mapstructure:"ui"`
-	Database DatabaseConfig `mapstructure:"database"`
-	History  HistoryConfig  `mapstructure:"history"`
-	Context  ContextConfig  `mapstructure:"context"`
-	Shell    ShellConfig    `mapstructure:"shell"`
-	Privacy  PrivacyConfig  `mapstructure:"privacy"`
-	Logging  LoggingConfig  `mapstructure:"logging"`
-	TLDR     TLDRConfig     `mapstructure:"tldr"`
+	App      AppConfig      `mapstructure:"app" yaml:"app"`
+	Fuzzy    FuzzyConfig    `mapstructure:"fuzzy" yaml:"fuzzy"`
+	UI       UIConfig       `mapstructure:"ui" yaml:"ui"`
+	Database DatabaseConfig `mapstructure:"database" yaml:"database"`
+	History  HistoryConfig  `mapstructure:"history" yaml:"history"`
+	Context  ContextConfig  `mapstructure:"context" yaml:"context"`
+	Shell    ShellConfig    `mapstructure:"shell" yaml:"shell"`
+	Privacy  PrivacyConfig  `mapstructure:"privacy" yaml:"privacy"`
+	Logging  LoggingConfig  `mapstructure:"logging" yaml:"logging"`
+	TLDR     TLDRConfig     `mapstructure:"tldr" yaml:"tldr"`
 }
 
 // AppConfig holds application settings
 type AppConfig struct {
-	Name        string `mapstructure:"name"`
-	Version     string `mapstructure:"version"`
-	Debug       bool   `mapstructure:"debug"`
-	Initialized bool   `mapstructure:"initialized"`
+	Name        string `mapstructure:"name" yaml:"name"`
+	Version     string `mapstructure:"version" yaml:"version"`
+	Debug       bool   `mapstructure:"debug" yaml:"debug"`
+	Initialized bool   `mapstructure:"initialized" yaml:"initialized"`
 }
 
 // IsInitialized returns true when the user has completed `wut init`
@@ -45,81 +45,81 @@ func IsInitialized() bool {
 
 // FuzzyConfig holds fuzzy matching settings
 type FuzzyConfig struct {
-	Enabled       bool    `mapstructure:"enabled"`
-	CaseSensitive bool    `mapstructure:"case_sensitive"`
-	MaxDistance   int     `mapstructure:"max_distance"`
-	Threshold     float64 `mapstructure:"threshold"`
+	Enabled       bool    `mapstructure:"enabled" yaml:"enabled"`
+	CaseSensitive bool    `mapstructure:"case_sensitive" yaml:"case_sensitive"`
+	MaxDistance   int     `mapstructure:"max_distance" yaml:"max_distance"`
+	Threshold     float64 `mapstructure:"threshold" yaml:"threshold"`
 }
 
 // UIConfig holds UI settings
 type UIConfig struct {
-	Theme              string            `mapstructure:"theme"`
-	ShowConfidence     bool              `mapstructure:"show_confidence"`
-	ShowExplanations   bool              `mapstructure:"show_explanations"`
-	SyntaxHighlighting bool              `mapstructure:"syntax_highlighting"`
-	Pagination         int               `mapstructure:"pagination"`
-	Colors             map[string]string `mapstructure:"colors"`
+	Theme              string            `mapstructure:"theme" yaml:"theme"`
+	ShowConfidence     bool              `mapstructure:"show_confidence" yaml:"show_confidence"`
+	ShowExplanations   bool              `mapstructure:"show_explanations" yaml:"show_explanations"`
+	SyntaxHighlighting bool              `mapstructure:"syntax_highlighting" yaml:"syntax_highlighting"`
+	Pagination         int               `mapstructure:"pagination" yaml:"pagination"`
+	Colors             map[string]string `mapstructure:"colors" yaml:"colors"`
 }
 
 // DatabaseConfig holds database settings
 type DatabaseConfig struct {
-	Type           string `mapstructure:"type"`
-	Path           string `mapstructure:"path"`
-	MaxSize        int    `mapstructure:"max_size"`
-	BackupEnabled  bool   `mapstructure:"backup_enabled"`
-	BackupInterval int    `mapstructure:"backup_interval"`
+	Type           string `mapstructure:"type" yaml:"type"`
+	Path           string `mapstructure:"path" yaml:"path"`
+	MaxSize        int    `mapstructure:"max_size" yaml:"max_size"`
+	BackupEnabled  bool   `mapstructure:"backup_enabled" yaml:"backup_enabled"`
+	BackupInterval int    `mapstructure:"backup_interval" yaml:"backup_interval"`
 }
 
 // HistoryConfig holds history settings
 type HistoryConfig struct {
-	Enabled        bool `mapstructure:"enabled"`
-	MaxEntries     int  `mapstructure:"max_entries"`
-	TrackFrequency bool `mapstructure:"track_frequency"`
-	TrackContext   bool `mapstructure:"track_context"`
-	TrackTiming    bool `mapstructure:"track_timing"`
+	Enabled        bool `mapstructure:"enabled" yaml:"enabled"`
+	MaxEntries     int  `mapstructure:"max_entries" yaml:"max_entries"`
+	TrackFrequency bool `mapstructure:"track_frequency" yaml:"track_frequency"`
+	TrackContext   bool `mapstructure:"track_context" yaml:"track_context"`
+	TrackTiming    bool `mapstructure:"track_timing" yaml:"track_timing"`
 }
 
 // ContextConfig holds context analysis settings
 type ContextConfig struct {
-	Enabled           bool `mapstructure:"enabled"`
-	GitIntegration    bool `mapstructure:"git_integration"`
-	ProjectDetection  bool `mapstructure:"project_detection"`
-	EnvironmentVars   bool `mapstructure:"environment_vars"`
-	DirectoryAnalysis bool `mapstructure:"directory_analysis"`
+	Enabled           bool `mapstructure:"enabled" yaml:"enabled"`
+	GitIntegration    bool `mapstructure:"git_integration" yaml:"git_integration"`
+	ProjectDetection  bool `mapstructure:"project_detection" yaml:"project_detection"`
+	EnvironmentVars   bool `mapstructure:"environment_vars" yaml:"environment_vars"`
+	DirectoryAnalysis bool `mapstructure:"directory_analysis" yaml:"directory_analysis"`
 }
 
 // ShellConfig holds shell integration settings
 type ShellConfig struct {
-	Enabled bool            `mapstructure:"enabled"`
-	Hooks   map[string]bool `mapstructure:"hooks"`
+	Enabled bool            `mapstructure:"enabled" yaml:"enabled"`
+	Hooks   map[string]bool `mapstructure:"hooks" yaml:"hooks"`
 }
 
 // PrivacyConfig holds privacy settings
 type PrivacyConfig struct {
-	LocalOnly         bool `mapstructure:"local_only"`
-	EncryptData       bool `mapstructure:"encrypt_data"`
-	AnonymizeCommands bool `mapstructure:"anonymize_commands"`
-	ShareAnalytics    bool `mapstructure:"share_analytics"`
+	LocalOnly         bool `mapstructure:"local_only" yaml:"local_only"`
+	EncryptData       bool `mapstructure:"encrypt_data" yaml:"encrypt_data"`
+	AnonymizeCommands bool `mapstructure:"anonymize_commands" yaml:"anonymize_commands"`
+	ShareAnalytics    bool `mapstructure:"share_analytics" yaml:"share_analytics"`
 }
 
 // LoggingConfig holds logging settings
 type LoggingConfig struct {
-	Level      string `mapstructure:"level"`
-	File       string `mapstructure:"file"`
-	MaxSize    int    `mapstructure:"max_size"`
-	MaxBackups int    `mapstructure:"max_backups"`
-	MaxAge     int    `mapstructure:"max_age"`
+	Level      string `mapstructure:"level" yaml:"level"`
+	File       string `mapstructure:"file" yaml:"file"`
+	MaxSize    int    `mapstructure:"max_size" yaml:"max_size"`
+	MaxBackups int    `mapstructure:"max_backups" yaml:"max_backups"`
+	MaxAge     int    `mapstructure:"max_age" yaml:"max_age"`
 }
 
 // TLDRConfig holds TLDR pages settings
 type TLDRConfig struct {
-	Enabled          bool   `mapstructure:"enabled"`
-	AutoSync         bool   `mapstructure:"auto_sync"`
-	AutoSyncInterval int    `mapstructure:"auto_sync_interval"` // days
-	OfflineMode      bool   `mapstructure:"offline_mode"`
-	AutoDetectOnline bool   `mapstructure:"auto_detect_online"`
-	MaxCacheAge      int    `mapstructure:"max_cache_age"` // days
-	DefaultPlatform  string `mapstructure:"default_platform"`
+	Enabled          bool   `mapstructure:"enabled" yaml:"enabled"`
+	AutoSync         bool   `mapstructure:"auto_sync" yaml:"auto_sync"`
+	AutoSyncInterval int    `mapstructure:"auto_sync_interval" yaml:"auto_sync_interval"` // days
+	OfflineMode      bool   `mapstructure:"offline_mode" yaml:"offline_mode"`
+	AutoDetectOnline bool   `mapstructure:"auto_detect_online" yaml:"auto_detect_online"`
+	MaxCacheAge      int    `mapstructure:"max_cache_age" yaml:"max_cache_age"` // days
+	DefaultPlatform  string `mapstructure:"default_platform" yaml:"default_platform"`
 }
 
 var (
@@ -212,24 +212,25 @@ func Set(cfg *Config) {
 
 // Save saves the current configuration to file
 func Save() error {
-	if globalConfig == nil {
+	configMu.RLock()
+	cfg := globalConfig
+	path := GetConfigPath()
+	configMu.RUnlock()
+
+	if cfg == nil {
 		return fmt.Errorf("no configuration to save")
 	}
 
-	// Update viper with current config
-	viper.Set("app", globalConfig.App)
-	viper.Set("fuzzy", globalConfig.Fuzzy)
-	viper.Set("ui", globalConfig.UI)
-	viper.Set("database", globalConfig.Database)
-	viper.Set("history", globalConfig.History)
-	viper.Set("context", globalConfig.Context)
-	viper.Set("shell", globalConfig.Shell)
-	viper.Set("privacy", globalConfig.Privacy)
-	viper.Set("logging", globalConfig.Logging)
-	viper.Set("tldr", globalConfig.TLDR)
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
 
-	// Write to file
-	if err := viper.WriteConfig(); err != nil {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+
+	if err := os.WriteFile(path, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config: %w", err)
 	}
 
@@ -259,6 +260,16 @@ func setDefaults() {
 
 	viper.SetDefault("history.enabled", true)
 	viper.SetDefault("history.max_entries", 10000)
+	viper.SetDefault("shell.enabled", true)
+	viper.SetDefault("shell.hooks.bash", true)
+	viper.SetDefault("shell.hooks.zsh", true)
+	viper.SetDefault("shell.hooks.fish", true)
+	viper.SetDefault("shell.hooks.powershell", true)
+	viper.SetDefault("shell.hooks.pwsh", true)
+	viper.SetDefault("shell.hooks.cmd", true)
+	viper.SetDefault("shell.hooks.nushell", true)
+	viper.SetDefault("shell.hooks.xonsh", true)
+	viper.SetDefault("shell.hooks.elvish", true)
 
 	viper.SetDefault("logging.level", "info")
 	viper.SetDefault("logging.file", getDefaultLogPath())
@@ -331,6 +342,11 @@ shell:
     zsh: true
     fish: true
     powershell: true
+    pwsh: true
+    cmd: true
+    nushell: true
+    xonsh: true
+    elvish: true
 
 privacy:
   local_only: true

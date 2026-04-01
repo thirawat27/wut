@@ -3,14 +3,18 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"wut/internal/performance"
 )
 
 const (
@@ -27,6 +31,12 @@ const (
 	PlatformOpenBSD = "openbsd"
 )
 
+var (
+	errPageNotFound    = errors.New("page not found")
+	errRemoteTemporary = errors.New("remote temporarily unavailable")
+	defaultCommandRank = buildDefaultCommandRank(getDefaultCommands())
+)
+
 // Client represents the TLDR API client
 type Client struct {
 	httpClient    *http.Client
@@ -38,6 +48,17 @@ type Client struct {
 	cacheInMemory bool
 	memoryCache   map[string]*Page
 	cacheMu       sync.RWMutex
+	matcher       *performance.FastMatcher
+	matchCache    *performance.LRUCache[string, []string]
+
+	commandsMu        sync.RWMutex
+	availableCommands []string
+
+	onlineMu         sync.RWMutex
+	onlineCached     bool
+	onlineCheckedAt  time.Time
+	onlineCheckTTL   time.Duration
+	remoteFailureTTL time.Duration
 }
 
 // Page represents a TLDR page with parsed content
@@ -105,11 +126,15 @@ func NewClient(opts ...ClientOption) *Client {
 		httpClient: &http.Client{
 			Timeout: 5 * time.Second,
 		},
-		baseURL:       baseRawURL,
-		language:      lang,
-		autoDetect:    true,
-		cacheInMemory: true,
-		memoryCache:   make(map[string]*Page),
+		baseURL:          baseRawURL,
+		language:         lang,
+		autoDetect:       true,
+		cacheInMemory:    true,
+		memoryCache:      make(map[string]*Page),
+		matcher:          performance.NewFastMatcher(false, 0.2, 3),
+		matchCache:       performance.NewLRUCache[string, []string](256, 16),
+		onlineCheckTTL:   15 * time.Second,
+		remoteFailureTTL: 5 * time.Second,
 	}
 	c.offlineMode.Store(false)
 
@@ -128,6 +153,7 @@ func (c *Client) SetHTTPClient(client *http.Client) {
 // SetStorage sets the local storage
 func (c *Client) SetStorage(storage *Storage) {
 	c.storage = storage
+	c.clearCommandCaches()
 }
 
 // SetOfflineMode enables or disables offline-only mode
@@ -151,6 +177,14 @@ func (c *Client) IsOnline(ctx context.Context) bool {
 		return false
 	}
 
+	c.onlineMu.RLock()
+	if !c.onlineCheckedAt.IsZero() && time.Since(c.onlineCheckedAt) < c.onlineCheckTTL {
+		online := c.onlineCached
+		c.onlineMu.RUnlock()
+		return online
+	}
+	c.onlineMu.RUnlock()
+
 	// Try to fetch a small page to check connectivity
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
@@ -163,11 +197,14 @@ func (c *Client) IsOnline(ctx context.Context) bool {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		c.setOnlineStatus(false)
 		return false
 	}
 	defer resp.Body.Close()
 
-	return resp.StatusCode == http.StatusOK
+	online := resp.StatusCode == http.StatusOK
+	c.setOnlineStatus(online)
+	return online
 }
 
 // GetPage retrieves a TLDR page for a specific command and platform
@@ -220,16 +257,19 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 
 	if err != nil && lang != "en" {
 		// Fallback to english if not found
-		fallbackURL := fmt.Sprintf("%s/pages/%s/%s.md", c.baseURL, platform, command)
-		content, err = c.fetch(ctx, fallbackURL)
-		if err == nil {
-			lang = "en"
+		if errors.Is(err, errPageNotFound) {
+			fallbackURL := fmt.Sprintf("%s/pages/%s/%s.md", c.baseURL, platform, command)
+			content, err = c.fetch(ctx, fallbackURL)
+			if err == nil {
+				lang = "en"
+			}
 		}
 	}
 
 	if err != nil {
-		// Network error - auto fall back to offline mode if autoDetect is enabled
-		if c.autoDetect {
+		// Remote availability error - auto fall back to offline mode if autoDetect is enabled
+		if c.autoDetect && isRemoteError(err) {
+			c.markRemoteUnavailable()
 			c.offlineMode.Store(true)
 			return nil, fmt.Errorf("offline mode: page not found in local storage: %s/%s (use 'wut db sync' to download)", platform, command)
 		}
@@ -250,6 +290,7 @@ func (c *Client) GetPage(ctx context.Context, command, platform string) (*Page, 
 		c.memoryCache[cacheKey] = page
 		c.cacheMu.Unlock()
 	}
+	c.rememberAvailableCommand(page.Name)
 
 	return page, nil
 }
@@ -359,14 +400,12 @@ func (c *Client) GetPageAnyPlatform(ctx context.Context, command string) (*Page,
 		if err == nil {
 			return page, nil
 		}
+		if isRemoteError(err) {
+			return nil, err
+		}
 	}
 
-	// If all failed and autoDetect is enabled, switch to offline mode
-	if c.autoDetect {
-		c.offlineMode.Store(true)
-	}
-
-	return nil, fmt.Errorf("page not found for command: %s", command)
+	return nil, fmt.Errorf("%w for command: %s", errPageNotFound, command)
 }
 
 // fetch retrieves raw content from the given URL
@@ -381,23 +420,25 @@ func (c *Client) fetch(ctx context.Context, url string) (string, error) {
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch: %w", err)
+		return "", fmt.Errorf("%w: failed to fetch: %w", errRemoteTemporary, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("page not found")
+		c.setOnlineStatus(true)
+		return "", errPageNotFound
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+		return "", fmt.Errorf("%w: unexpected status code: %d", errRemoteTemporary, resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read body: %w", err)
+		return "", fmt.Errorf("%w: failed to read body: %w", errRemoteTemporary, err)
 	}
 
+	c.setOnlineStatus(true)
 	return string(body), nil
 }
 
@@ -478,16 +519,94 @@ func formatCommand(cmd string) string {
 // GetAvailableCommands returns a list of available commands from local storage
 // or a default list if local storage is empty
 func (c *Client) GetAvailableCommands(ctx context.Context) ([]string, error) {
+	c.commandsMu.RLock()
+	if len(c.availableCommands) > 0 {
+		commands := append([]string(nil), c.availableCommands...)
+		c.commandsMu.RUnlock()
+		return commands, nil
+	}
+	c.commandsMu.RUnlock()
+
 	// Try local storage first
 	if c.storage != nil {
 		commands, err := c.storage.ListCommands(0)
 		if err == nil && len(commands) > 0 {
+			c.commandsMu.Lock()
+			c.availableCommands = append([]string(nil), commands...)
+			c.commandsMu.Unlock()
 			return commands, nil
 		}
 	}
 
 	// Return default list
-	return getDefaultCommands(), nil
+	commands := getDefaultCommands()
+	c.commandsMu.Lock()
+	c.availableCommands = append([]string(nil), commands...)
+	c.commandsMu.Unlock()
+	return commands, nil
+}
+
+// FindCommandMatches returns ranked command-name suggestions for a query.
+func (c *Client) FindCommandMatches(ctx context.Context, query string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	matchLimit := max(limit, 50)
+
+	commands, err := c.GetAvailableCommands(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if query == "" {
+		commands = rankBrowseCommands(commands)
+		if len(commands) > limit {
+			return commands[:limit], nil
+		}
+		return commands, nil
+	}
+
+	cacheKey := strings.ToLower(strings.TrimSpace(query))
+	if cached, ok := c.matchCache.Get(cacheKey); ok {
+		if len(cached) > limit {
+			return append([]string(nil), cached[:limit]...), nil
+		}
+		return append([]string(nil), cached...), nil
+	}
+
+	matches := c.matcher.MatchMultiple(cacheKey, commands)
+	results := make([]string, 0, min(len(matches), matchLimit))
+	seen := make(map[string]struct{}, limit)
+
+	for _, match := range matches {
+		if _, ok := seen[match.Target]; ok {
+			continue
+		}
+		seen[match.Target] = struct{}{}
+		results = append(results, match.Target)
+		if len(results) >= matchLimit {
+			c.matchCache.Set(cacheKey, append([]string(nil), results...), 5*time.Minute)
+			return append([]string(nil), results[:limit]...), nil
+		}
+	}
+
+	queryLower := cacheKey
+	for _, command := range commands {
+		if _, ok := seen[command]; ok {
+			continue
+		}
+		if strings.Contains(strings.ToLower(command), queryLower) {
+			results = append(results, command)
+			if len(results) >= matchLimit {
+				break
+			}
+		}
+	}
+
+	c.matchCache.Set(cacheKey, append([]string(nil), results...), 5*time.Minute)
+	if len(results) > limit {
+		return append([]string(nil), results[:limit]...), nil
+	}
+	return results, nil
 }
 
 // getDefaultCommands returns the default list of common commands
@@ -507,6 +626,62 @@ func getDefaultCommands() []string {
 	}
 }
 
+func buildDefaultCommandRank(commands []string) map[string]int {
+	ranks := make(map[string]int, len(commands))
+	for i, command := range commands {
+		ranks[command] = len(commands) - i
+	}
+	return ranks
+}
+
+func rankBrowseCommands(commands []string) []string {
+	ranked := append([]string(nil), commands...)
+	sort.SliceStable(ranked, func(i, j int) bool {
+		left := browseCommandScore(ranked[i])
+		right := browseCommandScore(ranked[j])
+		if left == right {
+			return ranked[i] < ranked[j]
+		}
+		return left > right
+	})
+	return ranked
+}
+
+func browseCommandScore(command string) int {
+	score := 0
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return -1000
+	}
+
+	if rank, ok := defaultCommandRank[command]; ok {
+		score += 10_000 + rank
+	}
+
+	first := command[0]
+	switch {
+	case (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z'):
+		score += 200
+	case first >= '0' && first <= '9':
+		score += 75
+	default:
+		score -= 300
+	}
+
+	score += max(0, 40-len(command))
+
+	if strings.IndexFunc(command, func(r rune) bool {
+		return !(r == '-' || r == '+' || r == '.' || r == '_' ||
+			(r >= '0' && r <= '9') ||
+			(r >= 'a' && r <= 'z') ||
+			(r >= 'A' && r <= 'Z'))
+	}) == -1 {
+		score += 25
+	}
+
+	return score
+}
+
 // HasLocalStorage returns true if client has local storage configured
 func (c *Client) HasLocalStorage() bool {
 	return c.storage != nil
@@ -522,6 +697,7 @@ func (c *Client) ClearMemoryCache() {
 	c.cacheMu.Lock()
 	c.memoryCache = make(map[string]*Page)
 	c.cacheMu.Unlock()
+	c.clearCommandCaches()
 }
 
 // GetMemoryCacheSize returns the number of pages in memory cache
@@ -529,4 +705,57 @@ func (c *Client) GetMemoryCacheSize() int {
 	c.cacheMu.RLock()
 	defer c.cacheMu.RUnlock()
 	return len(c.memoryCache)
+}
+
+func (c *Client) setOnlineStatus(online bool) {
+	c.onlineMu.Lock()
+	c.onlineCached = online
+	c.onlineCheckedAt = time.Now()
+	c.onlineMu.Unlock()
+	if online {
+		c.offlineMode.Store(false)
+	}
+}
+
+func (c *Client) markRemoteUnavailable() {
+	age := c.onlineCheckTTL - c.remoteFailureTTL
+	if age < 0 {
+		age = 0
+	}
+
+	c.onlineMu.Lock()
+	c.onlineCached = false
+	c.onlineCheckedAt = time.Now().Add(-age)
+	c.onlineMu.Unlock()
+}
+
+func isRemoteError(err error) bool {
+	return errors.Is(err, errRemoteTemporary)
+}
+
+func (c *Client) clearCommandCaches() {
+	c.commandsMu.Lock()
+	c.availableCommands = nil
+	c.commandsMu.Unlock()
+	if c.matchCache != nil {
+		c.matchCache.Clear()
+	}
+}
+
+func (c *Client) rememberAvailableCommand(command string) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return
+	}
+
+	c.commandsMu.Lock()
+	defer c.commandsMu.Unlock()
+
+	for _, existing := range c.availableCommands {
+		if existing == command {
+			return
+		}
+	}
+
+	c.availableCommands = append(c.availableCommands, command)
 }

@@ -162,6 +162,7 @@ func runUndo(cmd *cobra.Command, args []string) error {
 		store, err := db.NewStorage(config.GetDatabasePath())
 		if err == nil {
 			defer store.Close()
+			hydrateHistoryFromShell(context.Background(), store)
 			// Fetch a bit more just in case the latest are 'wut' commands
 			history, err := store.GetHistory(context.Background(), 10)
 			if err == nil && len(history) > 0 {

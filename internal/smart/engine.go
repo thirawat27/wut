@@ -4,6 +4,7 @@ package smart
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"sync"
@@ -91,6 +92,9 @@ func (e *Engine) Suggest(ctx context.Context, query string, contextData *appctx.
 	if limit <= 0 {
 		limit = 10
 	}
+	if contextData == nil {
+		contextData = &appctx.Context{ProjectType: "unknown"}
+	}
 
 	// Check cache for exact query
 	cacheKey := query + ":" + contextData.ProjectType
@@ -151,12 +155,7 @@ func (e *Engine) Suggest(ctx context.Context, query string, contextData *appctx.
 			}
 			for _, s := range suggestions {
 				if existing, ok := suggestionMap[s.Command]; ok {
-					// Merge scores
-					if s.Score > existing.Score {
-						existing.Score = s.Score
-					}
-					existing.UsageCount += s.UsageCount
-					suggestionMap[s.Command] = existing
+					suggestionMap[s.Command] = mergeSuggestion(existing, s)
 				} else {
 					suggestionMap[s.Command] = s
 				}
@@ -337,13 +336,19 @@ func (e *Engine) getContextSuggestions(ctx *appctx.Context, query string) []Sugg
 
 	// Get commands for current project type
 	if cmds, ok := projectCommands[ctx.ProjectType]; ok {
-		suggestions = append(suggestions, cmds...)
+		for _, cmd := range cmds {
+			cmd.ContextMatch = 1.0
+			suggestions = append(suggestions, cmd)
+		}
 	}
 
 	// Git commands for git repos
 	if ctx.IsGitRepo {
 		if cmds, ok := projectCommands["git"]; ok {
-			suggestions = append(suggestions, cmds...)
+			for _, cmd := range cmds {
+				cmd.ContextMatch = maxFloat64(cmd.ContextMatch, 0.9)
+				suggestions = append(suggestions, cmd)
+			}
 		}
 	}
 
@@ -363,18 +368,20 @@ func (e *Engine) getWorkflowSuggestions(ctx *appctx.Context, query string) []Sug
 	if ctx.IsGitRepo {
 		if len(ctx.GitStatus.ModifiedFiles) > 0 || len(ctx.GitStatus.StagedFiles) > 0 {
 			suggestions = append(suggestions, Suggestion{
-				Command:     "git add . && git commit -m \"update\"",
-				Description: "Quick commit all changes",
-				Source:      "⚡ Quick",
-				Icon:        "⚡",
+				Command:      "git add . && git commit -m \"update\"",
+				Description:  "Quick commit all changes",
+				Source:       "⚡ Quick",
+				Icon:         "⚡",
+				ContextMatch: 0.8,
 			})
 		}
 		if ctx.GitStatus.Ahead > 0 {
 			suggestions = append(suggestions, Suggestion{
-				Command:     "git push",
-				Description: "Push commits to remote",
-				Source:      "⚡ Quick",
-				Icon:        "🚀",
+				Command:      "git push",
+				Description:  "Push commits to remote",
+				Source:       "⚡ Quick",
+				Icon:         "🚀",
+				ContextMatch: 0.9,
 			})
 		}
 	}
@@ -409,10 +416,11 @@ func (e *Engine) getFuzzySuggestions(query string, limit int) []Suggestion {
 	suggestions := make([]Suggestion, 0, len(results))
 	for _, r := range results {
 		suggestions = append(suggestions, Suggestion{
-			Command: r.Target,
-			Score:   r.Score * e.weights.FuzzyMatch,
-			Source:  "🔍 Fuzzy",
-			Icon:    "🔍",
+			Command:      r.Target,
+			Score:        r.Score * e.weights.FuzzyMatch,
+			Source:       "🔍 Fuzzy",
+			Icon:         "🔍",
+			ContextMatch: 0.1,
 		})
 	}
 
@@ -431,12 +439,16 @@ func (e *Engine) filterSuggestions(suggestions []Suggestion, query string) []Sug
 	for _, s := range suggestions {
 		cmdLower := strings.ToLower(s.Command)
 		descLower := strings.ToLower(s.Description)
+		cmdMatch := e.matcher.Match(queryLower, cmdLower)
+		descMatch := e.matcher.Match(queryLower, descLower)
 
-		if strings.Contains(cmdLower, queryLower) || strings.Contains(descLower, queryLower) {
-			// Boost score for exact matches
+		if cmdMatch.Matched || descMatch.Matched || strings.Contains(cmdLower, queryLower) || strings.Contains(descLower, queryLower) {
 			if strings.HasPrefix(cmdLower, queryLower) {
 				s.Score += e.weights.PrefixMatch
+			} else if strings.Contains(cmdLower, queryLower) {
+				s.Score += e.weights.ContainsMatch
 			}
+			s.Score += maxFloat64(cmdMatch.Score, descMatch.Score*0.6) * e.weights.FuzzyMatch
 			filtered = append(filtered, s)
 		}
 	}
@@ -448,11 +460,17 @@ func (e *Engine) filterSuggestions(suggestions []Suggestion, query string) []Sug
 func (e *Engine) scoreAndSort(suggestions []Suggestion, query string, ctx *appctx.Context) []Suggestion {
 	// Score each suggestion
 	for i := range suggestions {
-		suggestions[i].Score = e.calculateFinalScore(suggestions[i], query, ctx)
+		suggestions[i] = e.calculateFinalScore(suggestions[i], query, ctx)
 	}
 
 	// Sort by score (descending)
 	sort.Slice(suggestions, func(i, j int) bool {
+		if suggestions[i].Score == suggestions[j].Score {
+			if suggestions[i].UsageCount == suggestions[j].UsageCount {
+				return suggestions[i].LastUsed.After(suggestions[j].LastUsed)
+			}
+			return suggestions[i].UsageCount > suggestions[j].UsageCount
+		}
 		return suggestions[i].Score > suggestions[j].Score
 	})
 
@@ -460,19 +478,44 @@ func (e *Engine) scoreAndSort(suggestions []Suggestion, query string, ctx *appct
 }
 
 // calculateFinalScore calculates the final score for a suggestion
-func (e *Engine) calculateFinalScore(s Suggestion, query string, ctx *appctx.Context) float64 {
+func (e *Engine) calculateFinalScore(s Suggestion, query string, ctx *appctx.Context) Suggestion {
 	score := s.Score
 
 	// Boost perfect matches
 	if query != "" && strings.EqualFold(s.Command, query) {
 		score += e.weights.ExactMatch
 		s.IsPerfectMatch = true
+	} else if query != "" {
+		match := e.matcher.Match(query, s.Command)
+		if match.Matched {
+			score += match.Score * e.weights.FuzzyMatch
+			if match.MatchStart == 0 {
+				score += e.weights.PrefixMatch * 0.5
+			}
+		}
 	}
 
 	// Context relevance boost
 	score += s.ContextMatch * e.weights.ContextRelevance
 
-	return score
+	if s.UsageCount > 0 {
+		score += math.Min(1.0, math.Log1p(float64(s.UsageCount))/3.0) * e.weights.HistoryFreq
+	}
+
+	if !s.LastUsed.IsZero() {
+		hoursSince := time.Since(s.LastUsed).Hours()
+		switch {
+		case hoursSince < 24:
+			score += e.weights.Recency
+		case hoursSince < 24*7:
+			score += e.weights.Recency * 0.6
+		case hoursSince < 24*30:
+			score += e.weights.Recency * 0.3
+		}
+	}
+
+	s.Score = score
+	return s
 }
 
 // limitSuggestions limits the number of suggestions
@@ -489,6 +532,56 @@ func formatCount(n int) string {
 		return "1 time"
 	}
 	return fmt.Sprintf("%d times", n)
+}
+
+func mergeSuggestion(existing, incoming Suggestion) Suggestion {
+	existing.Score += incoming.Score
+	existing.UsageCount = maxInt(existing.UsageCount, incoming.UsageCount)
+	if incoming.LastUsed.After(existing.LastUsed) {
+		existing.LastUsed = incoming.LastUsed
+	}
+	existing.ContextMatch = maxFloat64(existing.ContextMatch, incoming.ContextMatch)
+	existing.IsPerfectMatch = existing.IsPerfectMatch || incoming.IsPerfectMatch
+
+	if existing.Description == "" || (incoming.Description != "" && len(incoming.Description) < len(existing.Description)) {
+		existing.Description = incoming.Description
+	}
+	if existing.Icon == "" && incoming.Icon != "" {
+		existing.Icon = incoming.Icon
+	}
+	existing.Source = mergeSourceLabels(existing.Source, incoming.Source)
+	return existing
+}
+
+func mergeSourceLabels(existing, incoming string) string {
+	if existing == "" {
+		return incoming
+	}
+	if incoming == "" || existing == incoming {
+		return existing
+	}
+
+	parts := strings.Split(existing, " + ")
+	for _, part := range parts {
+		if part == incoming {
+			return existing
+		}
+	}
+	return existing + " + " + incoming
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func maxFloat64(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // GetFallbackSuggestions returns fallback suggestions when normal flow fails
