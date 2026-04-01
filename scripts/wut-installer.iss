@@ -79,7 +79,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 ; Bootstrap config + shell integration on first install so users do not need to run `wut install`
-Filename: "{app}\{#MyAppExeName}"; Parameters: "init --quick --shell powershell"; Flags: runhidden waituntilterminated skipifdoesntexist
+Filename: "{app}\{#MyAppExeName}"; Parameters: "init --quick"; Flags: runhidden waituntilterminated skipifdoesntexist
 ; Optional: Run application after installation
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
 

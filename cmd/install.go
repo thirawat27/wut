@@ -2,8 +2,10 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"wut/internal/shell"
 
@@ -21,7 +23,7 @@ This command sets up key bindings for your shell to quickly access WUT:
 - Ctrl+G: Open WUT with current command line
 
 Supports live integration for: bash, zsh, fish, powershell, pwsh, nushell, xonsh, elvish, cmd`,
-	Example: `  wut install           # Install for current shell
+	Example: `  wut install           # Install for all detected shells (default)
   wut install --all     # Install for all detected shells
   wut install --uninstall # Remove shell integration`,
 	RunE: runInstall,
@@ -46,19 +48,18 @@ func runInstall(cmd *cobra.Command, args []string) error {
 		return runUninstall()
 	}
 
-	// Detect current shell if not specified
 	if installShell == "" && !installAll {
-		installShell = detectShell()
-		if installShell == "" {
-			return fmt.Errorf("could not detect shell, please specify with --shell")
-		}
+		installAll = true
 	}
 
 	if installAll {
 		return installAllShells()
 	}
 
-	return installShellIntegration(installShell)
+	if err := installShellIntegration(installShell); err != nil {
+		return err
+	}
+	return runPostInstallHistoryImport()
 }
 
 func runUninstall() error {
@@ -141,7 +142,7 @@ func installAllShells() error {
 		fmt.Println()
 	}
 
-	return nil
+	return runPostInstallHistoryImport()
 }
 
 func uninstallAllShells() error {
@@ -165,4 +166,26 @@ func detectAllShells() []string {
 
 func normalizeInstallShell(sh string) string {
 	return shell.CanonicalName(sh)
+}
+
+func runPostInstallHistoryImport() error {
+	importCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	summary, err := bootstrapShellHistoryImport(importCtx)
+	if err != nil {
+		fmt.Printf("⚠️  Shell history import skipped: %v\n", err)
+		return nil
+	}
+
+	switch {
+	case summary.imported > 0:
+		fmt.Printf("✅ Imported %d history entries from %d shell sources\n", summary.imported, len(summary.sources))
+	case len(summary.sources) > 0:
+		fmt.Printf("✓ Scanned %d shell history sources; no new commands to import\n", len(summary.sources))
+	default:
+		fmt.Println("✓ No shell history sources detected")
+	}
+
+	return nil
 }

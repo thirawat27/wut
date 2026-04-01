@@ -231,7 +231,7 @@ function Invoke-WutInit {
         return
     }
 
-    $args = @("init", "--quick", "--shell", "powershell")
+    $args = @("init", "--quick")
     if ($NoShell) {
         $args += "--skip-shell"
     }

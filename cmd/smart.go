@@ -4,7 +4,6 @@ package cmd
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -71,9 +70,6 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Show context header
-	printContextInfo(appCtx)
-
 	// Initialize storage once and reuse it for correction, ranking and history.
 	storage := openSmartStorage(log)
 	if storage != nil {
@@ -90,6 +86,9 @@ func runSmart(cmd *cobra.Command, args []string) error {
 			if history, err := storage.GetHistory(context.Background(), 100); err == nil {
 				historyCmds := make([]string, 0, len(history))
 				for _, h := range history {
+					if strings.HasPrefix(strings.ToLower(strings.TrimSpace(h.Command)), "wut ") {
+						continue
+					}
 					historyCmds = append(historyCmds, h.Command)
 				}
 				c.SetHistoryCommands(historyCmds)
@@ -97,11 +96,12 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		}
 
 		if correction, err := c.Correct(query); err == nil && correction != nil {
-			printCorrection(correction)
 			if correction.IsDangerous {
+				printCorrection(correction)
 				return nil // Don't proceed with dangerous commands
 			}
-			if correction.Corrected != "" {
+			if shouldApplySmartCorrection(query, correction) {
+				printCorrection(correction)
 				query = correction.Corrected
 			}
 		}
@@ -153,28 +153,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		suggestions = engine.GetFallbackSuggestions(appCtx, smartLimit)
 	}
 
-	printSmartSuggestions(suggestions)
-
-	// Record this query in history (async, don't block)
-	if storage != nil {
-		recordCmd := "wut smart"
-		if query != "" {
-			recordCmd += " " + query
-		}
-		go func() {
-			recordCtx, recordCancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-			defer recordCancel()
-			if err := storage.AddHistory(recordCtx, recordCmd); err != nil {
-				log.Debug("failed to record history", "error", err)
-				return
-			}
-			if maxEntries := config.Get().History.MaxEntries; maxEntries > 0 {
-				if err := storage.TrimHistory(recordCtx, maxEntries); err != nil {
-					log.Debug("failed to trim history", "error", err)
-				}
-			}
-		}()
-	}
+	renderSmartView(query, appCtx, suggestions)
 
 	return nil
 }
@@ -204,53 +183,6 @@ func openSmartStorage(log *logger.Logger) *db.Storage {
 	return nil
 }
 
-func printContextInfo(ctx *appctx.Context) {
-	headerStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#7C3AED"))
-
-	infoStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#6B7280"))
-
-	// Print context
-	fmt.Println()
-	fmt.Println(headerStyle.Render("📍 Context"))
-
-	// Get folder name from working directory
-	folderName := filepath.Base(ctx.WorkingDir)
-	if folderName == "." || folderName == "/" || folderName == "\\" {
-		folderName = ctx.WorkingDir
-	}
-
-	info := []string{
-		fmt.Sprintf("Project: %s", folderName),
-	}
-
-	// Also show project type if detected
-	if ctx.ProjectType != "unknown" && ctx.ProjectType != "git" {
-		info = append(info, fmt.Sprintf("Type: %s", ctx.ProjectType))
-	}
-
-	if ctx.IsGitRepo {
-		info = append(info, fmt.Sprintf("Branch: %s", ctx.GitBranch))
-
-		if ctx.GitStatus.Ahead > 0 {
-			info = append(info, fmt.Sprintf("↑ %d commits ahead", ctx.GitStatus.Ahead))
-		}
-		if ctx.GitStatus.Behind > 0 {
-			info = append(info, fmt.Sprintf("↓ %d commits behind", ctx.GitStatus.Behind))
-		}
-		if !ctx.GitStatus.IsClean {
-			info = append(info, "📝 Has uncommitted changes")
-		}
-	}
-
-	for _, line := range info {
-		fmt.Println(infoStyle.Render("  " + line))
-	}
-	fmt.Println()
-}
-
 func printCorrection(c *corrector.Correction) {
 	if c.IsDangerous {
 		warningStyle := lipgloss.NewStyle().
@@ -272,53 +204,31 @@ func printCorrection(c *corrector.Correction) {
 	}
 }
 
-func printSmartSuggestions(suggestions []smart.Suggestion) {
-	// Group suggestions by source
-	bySource := make(map[string][]smart.Suggestion)
-	for _, s := range suggestions {
-		bySource[s.Source] = append(bySource[s.Source], s)
+func shouldApplySmartCorrection(original string, correction *corrector.Correction) bool {
+	if correction == nil {
+		return false
 	}
 
-	// Print header
-	fmt.Println(lipgloss.NewStyle().Bold(true).Render("💡 Smart Suggestions:"))
-	fmt.Println()
-
-	// Print suggestions with source grouping
-	printed := 0
-	for _, s := range suggestions {
-		icon := s.Icon
-		if icon == "" {
-			icon = "•"
-		}
-
-		// Color based on score
-		var cmdColor lipgloss.Style
-		if s.Score >= 1.5 {
-			cmdColor = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10B981")) // High score - green
-		} else if s.Score >= 1.0 {
-			cmdColor = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#3B82F6")) // Medium score - blue
-		} else {
-			cmdColor = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#6B7280")) // Low score - gray
-		}
-
-		sourceColor := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#9CA3AF")).
-			Render(s.Source)
-
-		fmt.Printf("%s %s %s\n", icon, cmdColor.Render(s.Command), sourceColor)
-
-		if s.Description != "" {
-			descStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#6B7280"))
-			fmt.Printf("   %s\n", descStyle.Render(s.Description))
-		}
-
-		printed++
-		if printed < len(suggestions) {
-			fmt.Println()
-		}
+	corrected := strings.TrimSpace(correction.Corrected)
+	original = strings.TrimSpace(original)
+	if corrected == "" || corrected == original {
+		return false
 	}
 
-	fmt.Println()
-	fmt.Println(lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Render("Tip: Use 'wut smart <query>' to search for specific commands"))
+	originalRoot := strings.ToLower(strings.TrimSpace(firstToken(original)))
+	correctedRoot := strings.ToLower(strings.TrimSpace(firstToken(corrected)))
+
+	if originalRoot != "wut" && correctedRoot == "wut" {
+		return false
+	}
+
+	return true
+}
+
+func firstToken(value string) string {
+	fields := strings.Fields(value)
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
 }

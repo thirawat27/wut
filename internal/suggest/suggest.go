@@ -7,8 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"wut/internal/commandsearch"
 	"wut/internal/db"
 	"wut/internal/historyml"
+	"wut/internal/performance"
 
 	"github.com/agnivade/levenshtein"
 )
@@ -62,6 +64,8 @@ func (s *Suggester) scoreSuggestions(query string, summaries []db.HistoryCommand
 	query = strings.ToLower(strings.TrimSpace(query))
 	results := make([]Result, 0)
 	summaryMap := make(map[string]db.HistoryCommandSummary, len(summaries))
+	matcher := performance.NewFastMatcher(false, 0.25, 3)
+	queryProfile := commandsearch.ParseQuery(query)
 
 	freqs := make(map[string]int, len(summaries))
 	for _, summary := range summaries {
@@ -72,38 +76,30 @@ func (s *Suggester) scoreSuggestions(query string, summaries []db.HistoryCommand
 	ranker := historyml.Train(toHistorySamples(summaries), time.Now())
 
 	for cmd, usageCount := range freqs {
-		cmdLower := strings.ToLower(cmd)
-
 		score := 0.0
 		source := "history"
+		profile := commandsearch.BuildProfile(cmd)
 
 		if query == "" {
 			score = float64(usageCount) * 10.0
 			source = "history"
-		} else if cmdLower == query {
-			score = 1000.0
-			source = "exact"
-		} else if strings.HasPrefix(cmdLower, query) {
-			score = 500.0 + float64(usageCount)*5.0
-			source = "prefix"
-		} else if strings.Contains(cmdLower, query) {
-			score = 300.0 + float64(usageCount)*3.0
-			source = "substring"
 		} else {
-			lenDiff := len(cmdLower) - len(query)
-			if lenDiff < 0 {
-				lenDiff = -lenDiff
+			if !commandsearch.HasAnchor(queryProfile, profile, matcher) {
+				continue
 			}
-			maxLen := len(cmdLower)
-			if len(query) > maxLen {
-				maxLen = len(query)
-			}
-
-			if maxLen > 0 && lenDiff <= maxLen/2 {
-				distance := levenshtein.ComputeDistance(query, cmdLower)
-				if distance <= maxLen/2 {
-					similarity := 1.0 - float64(distance)/float64(maxLen)
-					score = similarity * 100.0 * float64(usageCount)
+			matchScore, matched := commandsearch.Score(queryProfile, profile, matcher)
+			if matched {
+				score = matchScore / 18.0
+				switch {
+				case profile.Normalized == query:
+					source = "exact"
+				case profile.Intent != "" && profile.Intent == queryProfile.Intent && queryProfile.Intent != "":
+					source = "intent"
+				case strings.HasPrefix(profile.Normalized, query):
+					source = "prefix"
+				case strings.Contains(profile.SearchText, query):
+					source = "substring"
+				default:
 					source = "fuzzy"
 				}
 			}

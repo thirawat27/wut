@@ -14,12 +14,17 @@ import (
 	"github.com/goccy/go-json"
 	"go.etcd.io/bbolt"
 
+	"wut/internal/commandsearch"
 	"wut/internal/historyml"
 	"wut/internal/performance"
 	shellmeta "wut/internal/shell"
 )
 
-const historyBucketName = "command_execution_log"
+const (
+	historyBucketName           = "command_execution_log"
+	historyImportStateBucket    = "history_import_state"
+	historyImportTailWindowSize = 16
+)
 
 // CommandExecution represents a single execution of a command
 type CommandExecution struct {
@@ -51,6 +56,19 @@ type HistoryStats struct {
 	TimeDistribution  map[string]int
 	OSDistribution    map[string]int
 	ShellDistribution map[string]int
+}
+
+// HistoryImportState tracks incremental shell-history import progress.
+type HistoryImportState struct {
+	ImportedCount int       `json:"imported_count"`
+	TailCommands  []string  `json:"tail_commands,omitempty"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// HistorySearchMatch represents one ranked raw execution-log match.
+type HistorySearchMatch struct {
+	Entry CommandExecution
+	Score float64
 }
 
 // CommandStat represents a command and its occurrence count
@@ -128,19 +146,47 @@ func (s *Storage) GetAllHistory(ctx context.Context) ([]CommandExecution, error)
 
 // SearchHistory searches history logs by command text
 func (s *Storage) SearchHistory(ctx context.Context, query string, limit int) ([]CommandExecution, error) {
+	matches, err := s.SearchHistoryMatches(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	entries := make([]CommandExecution, len(matches))
+	for i, match := range matches {
+		entries[i] = match.Entry
+	}
+
+	return entries, nil
+}
+
+// SearchHistoryMatches searches the raw execution log and returns ranked raw
+// matches so callers can reuse the same retrieval path as `wut history`.
+func (s *Storage) SearchHistoryMatches(ctx context.Context, query string, limit int) ([]HistorySearchMatch, error) {
 	if s == nil || s.db == nil {
 		return nil, fmt.Errorf("storage not initialized")
 	}
 
 	query = strings.TrimSpace(query)
 	if query == "" {
-		return s.GetRecentUniqueHistory(ctx, limit, 0)
+		entries, err := s.GetRecentUniqueHistory(ctx, limit, 0)
+		if err != nil {
+			return nil, err
+		}
+		matches := make([]HistorySearchMatch, len(entries))
+		for i, entry := range entries {
+			matches[i] = HistorySearchMatch{
+				Entry: entry,
+				Score: recencyBonus(entry.Timestamp),
+			}
+		}
+		return matches, nil
 	}
 	if limit <= 0 {
 		limit = 20
 	}
 
 	matcher := performance.NewFastMatcher(false, 0.25, 3)
+	queryProfile := commandsearch.ParseQuery(query)
 	results := make([]scoredHistoryEntry, 0, limit)
 	commandStats := make(map[string]*HistoryCommandSummary)
 	scanRank := 0
@@ -165,7 +211,7 @@ func (s *Storage) SearchHistory(ctx context.Context, query string, limit int) ([
 
 			updateHistorySummary(commandStats, entry)
 
-			score, matched := scoreHistoryEntry(query, entry.Command, matcher)
+			score, matched := scoreHistoryEntry(queryProfile, entry.Command, matcher)
 			if !matched {
 				scanRank++
 				continue
@@ -212,12 +258,15 @@ func (s *Storage) SearchHistory(ctx context.Context, query string, limit int) ([
 		results = results[:limit]
 	}
 
-	entries := make([]CommandExecution, len(results))
+	matches := make([]HistorySearchMatch, len(results))
 	for i, result := range results {
-		entries[i] = result.entry
+		matches[i] = HistorySearchMatch{
+			Entry: result.entry,
+			Score: result.score,
+		}
 	}
 
-	return entries, nil
+	return matches, nil
 }
 
 // AddHistoryBatch adds multiple history entries in a single transaction while
@@ -505,6 +554,79 @@ func (s *Storage) GetCommandUsageCount(ctx context.Context, command string, stop
 	return count, err
 }
 
+// GetHistoryImportState retrieves persisted incremental-import state for a
+// shell history source.
+func (s *Storage) GetHistoryImportState(ctx context.Context, sourceKey string) (*HistoryImportState, error) {
+	if s == nil || s.db == nil {
+		return nil, fmt.Errorf("storage not initialized")
+	}
+
+	sourceKey = strings.TrimSpace(sourceKey)
+	if sourceKey == "" {
+		return nil, nil
+	}
+
+	var state HistoryImportState
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		bucket := tx.Bucket([]byte(historyImportStateBucket))
+		if bucket == nil {
+			return nil
+		}
+
+		data := bucket.Get([]byte(sourceKey))
+		if len(data) == 0 {
+			return nil
+		}
+
+		return json.Unmarshal(data, &state)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if state.ImportedCount == 0 && len(state.TailCommands) == 0 && state.UpdatedAt.IsZero() {
+		return nil, nil
+	}
+
+	return &state, nil
+}
+
+// SaveHistoryImportState stores incremental-import state for a shell history
+// source so subsequent imports can avoid duplicating the same commands.
+func (s *Storage) SaveHistoryImportState(ctx context.Context, sourceKey string, state *HistoryImportState) error {
+	if s == nil || s.db == nil {
+		return fmt.Errorf("storage not initialized")
+	}
+
+	sourceKey = strings.TrimSpace(sourceKey)
+	if sourceKey == "" {
+		return nil
+	}
+
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		bucket, err := tx.CreateBucketIfNotExists([]byte(historyImportStateBucket))
+		if err != nil {
+			return err
+		}
+		if state == nil {
+			return bucket.Delete([]byte(sourceKey))
+		}
+
+		payload, err := json.Marshal(state)
+		if err != nil {
+			return err
+		}
+		return bucket.Put([]byte(sourceKey), payload)
+	})
+}
+
 // ClearHistory clears all recorded command execution logs
 func (s *Storage) ClearHistory(ctx context.Context) error {
 	if s == nil || s.db == nil {
@@ -705,45 +827,16 @@ func historyID(ts time.Time) string {
 	return fmt.Sprintf("%020d", ts.UnixNano())
 }
 
-func scoreHistoryEntry(query, command string, matcher *performance.FastMatcher) (float64, bool) {
-	queryLower := strings.ToLower(strings.TrimSpace(query))
-	commandLower := strings.ToLower(strings.TrimSpace(command))
-	if queryLower == "" || commandLower == "" {
+func scoreHistoryEntry(query commandsearch.Query, command string, matcher *performance.FastMatcher) (float64, bool) {
+	if query.Normalized == "" || strings.TrimSpace(command) == "" {
 		return 0, false
 	}
 
-	score := 0.0
-
-	switch {
-	case commandLower == queryLower:
-		score += 1000
-	case strings.HasPrefix(commandLower, queryLower):
-		score += 700
-	case strings.Contains(commandLower, queryLower):
-		score += 500
+	profile := commandsearch.BuildProfile(command)
+	if !commandsearch.HasAnchor(query, profile, matcher) {
+		return 0, false
 	}
-
-	queryTokens := strings.Fields(queryLower)
-	if len(queryTokens) > 1 {
-		matchedTokens := 0
-		for _, token := range queryTokens {
-			if strings.Contains(commandLower, token) {
-				matchedTokens++
-			}
-		}
-		if matchedTokens == len(queryTokens) {
-			score += 250
-		} else if matchedTokens > 0 {
-			score += float64(matchedTokens) * 60
-		}
-	}
-
-	match := matcher.Match(queryLower, commandLower)
-	if match.Matched {
-		score += match.Score * 150
-	}
-
-	return score, score > 0
+	return commandsearch.Score(query, profile, matcher)
 }
 
 func recencyBonus(ts time.Time) float64 {

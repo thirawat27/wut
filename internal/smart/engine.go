@@ -5,14 +5,19 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"wut/internal/commandsearch"
 	appctx "wut/internal/context"
 	"wut/internal/db"
+	"wut/internal/historyml"
 	"wut/internal/performance"
+	"wut/internal/shell"
 )
 
 // Engine provides intelligent command suggestions
@@ -103,7 +108,7 @@ func (e *Engine) Suggest(ctx context.Context, query string, contextData *appctx.
 	}
 
 	// Collect suggestions from all sources concurrently
-	suggestionChan := make(chan []Suggestion, 4)
+	suggestionChan := make(chan []Suggestion, 5)
 	var wg sync.WaitGroup
 
 	// 1. History-based suggestions
@@ -134,6 +139,14 @@ func (e *Engine) Suggest(ctx context.Context, query string, contextData *appctx.
 	wg.Go(func() {
 		select {
 		case suggestionChan <- e.getFuzzySuggestions(query, limit):
+		case <-ctx.Done():
+		}
+	})
+
+	// 5. Command catalog / TLDR suggestions
+	wg.Go(func() {
+		select {
+		case suggestionChan <- e.getCatalogSuggestions(ctx, query, limit):
 		case <-ctx.Done():
 		}
 	})
@@ -194,77 +207,142 @@ func (e *Engine) getHistorySuggestions(ctx context.Context, query string, limit 
 	default:
 	}
 
-	historyLimit := 1000 // Look deep for sequential mapping
-	if limit > 0 && limit < 100 {
-		historyLimit = limit * 50
+	if strings.TrimSpace(query) != "" {
+		return e.getHistoryLogSuggestions(ctx, query, limit)
 	}
 
-	entries, err := e.storage.GetHistory(ctx, historyLimit)
-	if err != nil || len(entries) == 0 {
+	return e.getHistorySummarySuggestions(ctx, limit)
+}
+
+func (e *Engine) getHistorySummarySuggestions(ctx context.Context, limit int) []Suggestion {
+	scanLimit := 0
+	if limit > 0 && limit < 100 {
+		scanLimit = limit * 400
+		if scanLimit < 800 {
+			scanLimit = 800
+		}
+	}
+
+	summaries, err := e.storage.GetHistoryCommandSummaries(ctx, scanLimit)
+	if err != nil || len(summaries) == 0 {
 		return nil
 	}
 
-	var suggestions []Suggestion
-	recentCmd := entries[0].Command
+	ranker := historyml.Train(historySummariesToSamples(summaries), time.Now())
+	currentShell := shell.DetectCurrentShell()
+	currentOS := runtime.GOOS
 
-	cmdScores := make(map[string]float64)
-	usageCounts := make(map[string]int)
-	lastUsed := make(map[string]time.Time)
-	now := time.Now()
+	suggestions := make([]Suggestion, 0, len(summaries))
+	for _, summary := range summaries {
+		profile := commandsearch.BuildProfile(summary.Command)
 
-	for i := 0; i < len(entries); i++ {
-		cmd := entries[i].Command
-		usageCounts[cmd]++
+		score := historySummaryBoost(summary, ranker)
+		score += historySummarySourceBoost(summary, currentOS, currentShell)
 
-		if _, exists := lastUsed[cmd]; !exists {
-			lastUsed[cmd] = entries[i].Timestamp
+		description := historySummaryDescription(summary, profile)
+		contextMatch := 0.0
+		if summary.SourceOS == currentOS || summary.SourceShell == currentShell {
+			contextMatch = 0.35
 		}
 
-		score := 0.0
-
-		if query != "" {
-			result := e.matcher.Match(query, cmd)
-			if !result.Matched {
-				continue
-			}
-			score += result.Score * e.weights.FuzzyMatch
-		}
-
-		// Markov-inspired sequence boost
-		if i < len(entries)-1 && entries[i+1].Command == recentCmd {
-			score += 5.0
-		}
-
-		daysSince := now.Sub(entries[i].Timestamp).Hours() / 24
-		if daysSince < 1 {
-			score += e.weights.Recency * 1.5
-		} else if daysSince < 7 {
-			score += e.weights.Recency * 0.8
-		}
-
-		cmdScores[cmd] += score
-	}
-
-	for cmd, count := range usageCounts {
-		if count > 1 {
-			cmdScores[cmd] += (float64(count) / 100.0) * e.weights.HistoryFreq
-		}
-	}
-
-	for cmd, score := range cmdScores {
-		if score > 0 || query == "" {
-			suggestions = append(suggestions, Suggestion{
-				Command:     cmd,
-				Description: fmt.Sprintf("Used %s", formatCount(usageCounts[cmd])),
-				Score:       score,
-				Source:      "🌌 Smart History",
-				UsageCount:  usageCounts[cmd],
-				LastUsed:    lastUsed[cmd],
-			})
-		}
+		suggestions = append(suggestions, Suggestion{
+			Command:      summary.Command,
+			Description:  description,
+			Score:        score,
+			Source:       "🌌 Smart History",
+			Icon:         "🕘",
+			UsageCount:   summary.UsageCount,
+			LastUsed:     summary.LastUsed,
+			ContextMatch: contextMatch,
+		})
 	}
 
 	return suggestions
+}
+
+func (e *Engine) getHistoryLogSuggestions(ctx context.Context, query string, limit int) []Suggestion {
+	if e.storage == nil {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	searchLimit := limit * 50
+	if searchLimit < 150 {
+		searchLimit = 150
+	}
+	if searchLimit > 500 {
+		searchLimit = 500
+	}
+
+	matches, err := e.storage.SearchHistoryMatches(ctx, query, searchLimit)
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+
+	currentShell := shell.DetectCurrentShell()
+	currentOS := runtime.GOOS
+	queryProfile := commandsearch.ParseQuery(query)
+	suggestionMap := make(map[string]Suggestion, len(matches))
+
+	for idx, match := range matches {
+		entry := match.Entry
+		profile := commandsearch.BuildProfile(entry.Command)
+		if shouldSuppressSmartHistoryCommand(queryProfile, entry.Command, profile) {
+			continue
+		}
+
+		suggestion, ok := suggestionMap[entry.Command]
+		if !ok {
+			contextMatch := 0.0
+			if entry.SourceOS == currentOS || entry.Shell == currentShell {
+				contextMatch = 0.35
+			}
+
+			suggestion = Suggestion{
+				Command:      entry.Command,
+				Description:  historyLogDescription(1, entry.Timestamp, profile),
+				Score:        historyLogBaseScore(match.Score, idx),
+				Source:       "🌌 Smart History",
+				Icon:         "🕘",
+				UsageCount:   1,
+				LastUsed:     entry.Timestamp,
+				ContextMatch: contextMatch,
+			}
+		} else {
+			suggestion.UsageCount++
+			if entry.Timestamp.After(suggestion.LastUsed) {
+				suggestion.LastUsed = entry.Timestamp
+			}
+			suggestion.Score += historyLogRepeatBoost(match.Score, idx)
+		}
+
+		suggestion.Score += historyEntrySourceBoost(entry, currentOS, currentShell)
+		suggestion.Description = historyLogDescription(suggestion.UsageCount, suggestion.LastUsed, profile)
+		suggestionMap[entry.Command] = suggestion
+	}
+
+	results := make([]Suggestion, 0, len(suggestionMap))
+	for _, suggestion := range suggestionMap {
+		results = append(results, suggestion)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].Score == results[j].Score {
+			if results[i].UsageCount == results[j].UsageCount {
+				return results[i].LastUsed.After(results[j].LastUsed)
+			}
+			return results[i].UsageCount > results[j].UsageCount
+		}
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit*3 {
+		results = results[:limit*3]
+	}
+
+	return results
 }
 
 // (Legacy method removed, handled via unified scoring above)
@@ -392,6 +470,76 @@ func (e *Engine) getWorkflowSuggestions(ctx *appctx.Context, query string) []Sug
 	}
 
 	return e.filterSuggestions(suggestions, query)
+}
+
+// getCatalogSuggestions broadens discovery using the local command catalog and
+// TLDR database so smart search can surface commands the user has not used yet.
+func (e *Engine) getCatalogSuggestions(ctx context.Context, query string, limit int) []Suggestion {
+	if e.storage == nil || strings.TrimSpace(query) == "" {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+
+	suggestionMap := make(map[string]Suggestion)
+	addSuggestion := func(s Suggestion) {
+		if existing, ok := suggestionMap[s.Command]; ok {
+			suggestionMap[s.Command] = mergeSuggestion(existing, s)
+			return
+		}
+		suggestionMap[s.Command] = s
+	}
+
+	commands, err := e.storage.ListCommands(0)
+	if err == nil {
+		for _, match := range e.matcher.MatchMultiple(query, commands) {
+			addSuggestion(Suggestion{
+				Command:      match.Target,
+				Description:  "Available in local command reference",
+				Score:        0.8 + match.Score,
+				Source:       "📚 Command DB",
+				Icon:         "📚",
+				ContextMatch: 0.15,
+			})
+			if len(suggestionMap) >= limit*4 {
+				break
+			}
+		}
+	}
+
+	pages, err := e.storage.SearchLocalLimited(query, limit*6)
+	if err == nil {
+		for _, page := range pages {
+			match := e.matcher.Match(strings.ToLower(query), strings.ToLower(page.Name+" "+page.Description))
+			score := 0.6
+			if match.Matched {
+				score += match.Score
+			}
+			addSuggestion(Suggestion{
+				Command:      page.Name,
+				Description:  page.Description,
+				Score:        score,
+				Source:       "📚 Command DB",
+				Icon:         "📚",
+				ContextMatch: 0.25,
+			})
+		}
+	}
+
+	results := make([]Suggestion, 0, len(suggestionMap))
+	for _, suggestion := range suggestionMap {
+		results = append(results, suggestion)
+	}
+
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Score > results[j].Score
+	})
+
+	if len(results) > limit*3 {
+		results = results[:limit*3]
+	}
+	return results
 }
 
 // getFuzzySuggestions gets fuzzy-matched suggestions from common commands
@@ -582,6 +730,224 @@ func maxFloat64(a, b float64) float64 {
 		return a
 	}
 	return b
+}
+
+func historySummariesToSamples(summaries []db.HistoryCommandSummary) []historyml.CommandSample {
+	samples := make([]historyml.CommandSample, 0, len(summaries))
+	for _, summary := range summaries {
+		samples = append(samples, historyml.CommandSample{
+			Command:     summary.Command,
+			UsageCount:  summary.UsageCount,
+			LastUsed:    summary.LastUsed,
+			SourceOS:    summary.SourceOS,
+			SourceShell: summary.SourceShell,
+		})
+	}
+	return samples
+}
+
+func historySummaryBoost(summary db.HistoryCommandSummary, ranker *historyml.Ranker) float64 {
+	score := math.Log1p(float64(summary.UsageCount)) * 0.85
+	if !summary.LastUsed.IsZero() {
+		hoursSince := time.Since(summary.LastUsed).Hours()
+		switch {
+		case hoursSince < 24:
+			score += 0.9
+		case hoursSince < 24*7:
+			score += 0.55
+		case hoursSince < 24*30:
+			score += 0.2
+		}
+	}
+	if ranker != nil {
+		score += ranker.Score(historyml.CommandSample{
+			Command:     summary.Command,
+			UsageCount:  summary.UsageCount,
+			LastUsed:    summary.LastUsed,
+			SourceOS:    summary.SourceOS,
+			SourceShell: summary.SourceShell,
+		}) * 1.4
+	}
+	return score
+}
+
+func historySummarySourceBoost(summary db.HistoryCommandSummary, currentOS, currentShell string) float64 {
+	boost := 0.0
+	if summary.SourceOS == currentOS && currentOS != "" {
+		boost += 0.25
+	}
+	if summary.SourceShell == currentShell && currentShell != "" {
+		boost += 0.2
+	}
+	return boost
+}
+
+func historySummaryDescription(summary db.HistoryCommandSummary, profile commandsearch.Profile) string {
+	parts := []string{fmt.Sprintf("Used %s", formatCount(summary.UsageCount))}
+	if age := formatRelativeAge(summary.LastUsed); age != "" {
+		parts = append(parts, age)
+	}
+	if profile.Intent != "" && profile.Intent != profile.Executable && profile.Intent != profile.Normalized {
+		parts = append(parts, "intent: "+profile.Intent)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func formatRelativeAge(ts time.Time) string {
+	if ts.IsZero() {
+		return ""
+	}
+
+	hoursSince := time.Since(ts).Hours()
+	switch {
+	case hoursSince < 1:
+		return "seen recently"
+	case hoursSince < 24:
+		return fmt.Sprintf("last seen %.0fh ago", math.Ceil(hoursSince))
+	case hoursSince < 24*7:
+		return fmt.Sprintf("last seen %.0fd ago", math.Ceil(hoursSince/24))
+	default:
+		return "used before"
+	}
+}
+
+func historyLogBaseScore(matchScore float64, rank int) float64 {
+	score := matchScore / 260.0
+	switch {
+	case rank < 3:
+		score += 0.6
+	case rank < 10:
+		score += 0.3
+	case rank < 25:
+		score += 0.15
+	}
+	return score
+}
+
+func historyLogRepeatBoost(matchScore float64, rank int) float64 {
+	boost := matchScore / 1200.0
+	if rank < 10 {
+		boost += 0.08
+	}
+	return boost
+}
+
+func historyEntrySourceBoost(entry db.CommandExecution, currentOS, currentShell string) float64 {
+	boost := 0.0
+	if entry.SourceOS == currentOS && currentOS != "" {
+		boost += 0.06
+	}
+	if entry.Shell == currentShell && currentShell != "" {
+		boost += 0.05
+	}
+	return boost
+}
+
+func historyLogDescription(matches int, lastUsed time.Time, profile commandsearch.Profile) string {
+	parts := []string{fmt.Sprintf("Matched %s in history", formatCount(matches))}
+	if age := formatRelativeAge(lastUsed); age != "" {
+		parts = append(parts, age)
+	}
+	if profile.Intent != "" && profile.Intent != profile.Executable && profile.Intent != profile.Normalized {
+		parts = append(parts, "intent: "+profile.Intent)
+	}
+	return strings.Join(parts, " · ")
+}
+
+func shouldSuppressSmartHistoryCommand(query commandsearch.Query, raw string, profile commandsearch.Profile) bool {
+	if query.Normalized == "" || profile.Executable == "" {
+		return false
+	}
+
+	if query.Executable != "" && query.Executable != profile.Executable {
+		if !intentMentionsQueryExecutable(query, profile) {
+			return true
+		}
+	}
+
+	if query.Subcommand != "" {
+		if profile.Subcommand != "" && query.Subcommand != profile.Subcommand {
+			return true
+		}
+		if profile.Subcommand == "" && !rootCommandMentionsSubcommand(raw, query.Executable, query.Subcommand) {
+			return true
+		}
+	}
+
+	if isCompoundHistoryCommand(raw) {
+		if query.Subcommand != "" && profile.Subcommand == "" && !strings.HasPrefix(profile.Normalized, query.Normalized) {
+			return true
+		}
+	}
+
+	switch profile.Executable {
+	case "wut", "cd", "pushd", "popd", "pwd", "ls", "dir", "clear", "cls":
+		return query.Executable != profile.Executable
+	default:
+		return false
+	}
+}
+
+func intentMentionsQueryExecutable(query commandsearch.Query, profile commandsearch.Profile) bool {
+	if query.Executable == "" {
+		return false
+	}
+	if profile.Intent == query.Executable || strings.HasSuffix(profile.Intent, " "+query.Executable) {
+		return true
+	}
+	return profile.Subcommand == query.Executable
+}
+
+func isCompoundHistoryCommand(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	return strings.Contains(raw, "&&") ||
+		strings.Contains(raw, "||") ||
+		strings.Contains(raw, " | ") ||
+		strings.Contains(raw, " ; ") ||
+		strings.Contains(raw, ";") ||
+		strings.Contains(raw, "\n")
+}
+
+func rootCommandMentionsSubcommand(raw, executable, subcommand string) bool {
+	if executable == "" || subcommand == "" {
+		return false
+	}
+
+	fields := strings.Fields(raw)
+	if len(fields) == 0 {
+		return false
+	}
+	if normalizeSmartToken(fields[0]) != executable {
+		return false
+	}
+
+	for i := 1; i < len(fields) && i <= 6; i++ {
+		token := strings.TrimSpace(fields[i])
+		switch token {
+		case "&&", "||", "|", ";":
+			return false
+		}
+		if normalizeSmartToken(token) == subcommand {
+			return true
+		}
+	}
+
+	return false
+}
+
+func normalizeSmartToken(value string) string {
+	value = strings.TrimSpace(strings.Trim(value, "\"'`"))
+	if value == "" {
+		return ""
+	}
+	value = filepath.Base(value)
+	value = strings.TrimSuffix(value, ".exe")
+	value = strings.TrimSuffix(value, ".cmd")
+	value = strings.TrimSuffix(value, ".bat")
+	return strings.ToLower(value)
 }
 
 // GetFallbackSuggestions returns fallback suggestions when normal flow fails

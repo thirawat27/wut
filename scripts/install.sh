@@ -176,31 +176,13 @@ choose_install_dir() {
     echo "${HOME}/.local/bin"
 }
 
-detect_shell_name() {
-    local shell_name="${SHELL:-}"
-    shell_name="$(basename "$shell_name" 2>/dev/null || true)"
-    shell_name="${shell_name%.exe}"
-    case "$shell_name" in
-        bash|zsh|fish|pwsh|powershell|nu|nushell|xonsh|elvish)
-            if [ "$shell_name" = "nu" ]; then
-                echo "nushell"
-            else
-                echo "$shell_name"
-            fi
-            ;;
-        *) echo "bash" ;;
-    esac
-}
-
 run_quick_init() {
     local binary_path="$1"
     if [ "$NO_INIT" = true ]; then
         return
     fi
 
-    local shell_name
-    shell_name="$(detect_shell_name)"
-    local args=(init --quick --shell "$shell_name")
+    local args=(init --quick)
     if [ "$NO_SHELL" = true ]; then
         args+=(--skip-shell)
     fi

@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"context"
 	"fmt"
 	"os"
 	"os/signal"
@@ -158,7 +159,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 		fmt.Println(panelBorder.Width(heroWidth).Render(heroContent))
 	}
 
-	totalSteps := 4
+	totalSteps := 5
 	if initSkipShell {
 		totalSteps--
 	}
@@ -265,40 +266,44 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// ─── Step 3: Shell Integration (auto-install, merged from 'wut install') ──
 	if !initSkipShell {
 		activeShell := shell.DetectCurrentShell()
-		shellType := initShell
-		if shellType == "" {
-			shellType = detectShellForInit()
-		}
+		shellTargets := detectShellsForInit(initShell)
 
 		if !initQuick {
 			printStep("🐚", "Shell Integration")
-			displayShell := shellType
+			displayShell := activeShell
+			if displayShell == "" && len(shellTargets) > 0 {
+				displayShell = shellTargets[0]
+			}
 			if activeShell != "" {
 				displayShell = activeShell
 			}
 			fmt.Printf("    Detected active shell: %s\n", valFmt(displayShell))
-			if activeShell != "" && shellType != "" && activeShell != shellType {
-				fmt.Printf("    %s\n", lipgloss.NewStyle().Foreground(cGray).Render("Falling back to installable shell target: "+shellType))
+			if len(shellTargets) > 0 {
+				fmt.Printf("    %s\n", lipgloss.NewStyle().Foreground(cGray).Render("Installing integration for: "+strings.Join(shellTargets, ", ")))
 			}
 			fmt.Println()
 			fmt.Printf("    %s\n\n", lipgloss.NewStyle().Foreground(cGray).Render("Installing key bindings, command-not-found hooks, and pro-tips..."))
 		}
 
-		// Auto-install shell integration (replaces separate 'wut install' step)
-		if err := installShellIntegration(shellType); err != nil {
-			if initQuick {
-				fmt.Printf("Shell integration skipped: %v\n", err)
-			}
-			if !initQuick {
-				if err.Error() == "already installed" {
-					printOK("Shell hooks already installed")
-				} else {
-					printWarn("Shell integration: " + err.Error())
+		installedShells := 0
+		for _, shellType := range shellTargets {
+			if err := installShellIntegration(shellType); err != nil {
+				if initQuick {
+					fmt.Printf("Shell integration skipped for %s: %v\n", shellType, err)
 				}
+				if !initQuick {
+					if err.Error() == "already installed" {
+						printOK(fmt.Sprintf("%s hooks already installed", shellType))
+					} else {
+						printWarn(fmt.Sprintf("%s integration: %v", shellType, err))
+					}
+				}
+				continue
 			}
-		} else {
+
+			installedShells++
 			if !initQuick {
-				printOK("Hooks installed successfully")
+				printOK(fmt.Sprintf("%s hooks installed successfully", shellType))
 				reloadCmd := shell.GetReloadCommand(shellType, getShellRcFile(shellType))
 				if reloadCmd == "" {
 					reloadCmd = "restart your shell"
@@ -309,9 +314,44 @@ func runInit(cmd *cobra.Command, args []string) error {
 				)
 			}
 		}
+
+		if initQuick && installedShells == 0 && len(shellTargets) == 0 {
+			fmt.Println("Shell integration skipped: no installable shells detected")
+		}
 	}
 
-	// ─── Step 4: TLDR Pages ────────────────────────────────────────────────────
+	// ─── Step 4: Shell History Import ─────────────────────────────────────────
+	if !initQuick {
+		printStep("🕘", "History Import")
+	}
+	if cfg.History.Enabled {
+		importCtx, importCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer importCancel()
+
+		summary, err := bootstrapShellHistoryImport(importCtx)
+		if err != nil {
+			if initQuick {
+				fmt.Printf("Shell history import skipped: %v\n", err)
+			} else {
+				printWarn("Shell history import: " + err.Error())
+			}
+		} else if !initQuick {
+			switch {
+			case summary.imported > 0:
+				printOK(fmt.Sprintf("Imported %d history entries from %d shell sources", summary.imported, len(summary.sources)))
+			case len(summary.sources) > 0:
+				printOK(fmt.Sprintf("Scanned %d shell history sources; no new commands to import", len(summary.sources)))
+			default:
+				printOK("No shell history sources detected on this machine")
+			}
+		} else if summary.imported > 0 {
+			fmt.Printf("Imported %d shell history entries\n", summary.imported)
+		}
+	} else if !initQuick {
+		printWarn("History tracking disabled; shell history import skipped")
+	}
+
+	// ─── Step 5: TLDR Pages ────────────────────────────────────────────────────
 	if !initSkipTLDR {
 		if !initQuick {
 			printStep("📚", "Offline Knowledge Base")
@@ -389,6 +429,23 @@ func detectShellForInit() string {
 		return preferred
 	}
 	return "bash"
+}
+
+func detectShellsForInit(explicit string) []string {
+	if explicit = shell.CanonicalName(explicit); explicit != "" {
+		return []string{explicit}
+	}
+
+	shells := shell.DetectInstallableShells()
+	if len(shells) > 0 {
+		return shells
+	}
+
+	if fallback := detectShellForInit(); fallback != "" {
+		return []string{fallback}
+	}
+
+	return nil
 }
 
 func getShellRcFile(shellType string) string {

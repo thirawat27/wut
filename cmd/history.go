@@ -539,6 +539,28 @@ func hydrateHistoryFromShell(ctx context.Context, storage *db.Storage) {
 	_, _ = importShellHistoryEntries(hydrateCtx, storage, 500)
 }
 
+func bootstrapShellHistoryImport(ctx context.Context) (*shellHistoryImportSummary, error) {
+	if !config.Get().History.Enabled {
+		return &shellHistoryImportSummary{}, nil
+	}
+	if err := config.EnsureDirs(); err != nil {
+		return nil, err
+	}
+
+	sources := shell.DetectHistorySources()
+	if len(sources) == 0 {
+		return &shellHistoryImportSummary{}, nil
+	}
+
+	storage, err := db.NewStorage(config.GetDatabasePath())
+	if err != nil {
+		return nil, err
+	}
+	defer storage.Close()
+
+	return importShellHistoryEntries(ctx, storage, 0)
+}
+
 type shellHistoryImportSummary struct {
 	sources  []shell.HistorySource
 	perShell []string
@@ -555,26 +577,61 @@ func importShellHistoryEntries(ctx context.Context, storage *db.Storage, limitPe
 	start := time.Now()
 	allEntries := make([]db.CommandExecution, 0, 4096)
 	perShell := make([]string, 0, len(sources))
+	type importStateUpdate struct {
+		key   string
+		state *db.HistoryImportState
+	}
+	stateUpdates := make([]importStateUpdate, 0, len(sources))
+
 	for _, source := range sources {
 		commands, err := shell.ReadHistory(source)
 		if err != nil {
 			perShell = append(perShell, fmt.Sprintf("  ! %s (%s): failed to read history (%v)", source.Shell, source.DisplayPath(), err))
 			continue
 		}
-		if limitPerShell > 0 && len(commands) > limitPerShell {
-			commands = commands[len(commands)-limitPerShell:]
+
+		totalCommands := len(commands)
+		newCommands := commands
+		if limitPerShell > 0 && len(newCommands) > limitPerShell {
+			newCommands = newCommands[len(newCommands)-limitPerShell:]
 		}
-		for _, command := range commands {
+
+		if limitPerShell == 0 {
+			stateKey := shellHistorySourceKey(source)
+			state, err := storage.GetHistoryImportState(ctx, stateKey)
+			if err == nil {
+				startAt := determineShellImportStart(commands, state)
+				if startAt > len(commands) {
+					startAt = len(commands)
+				}
+				newCommands = commands[startAt:]
+			}
+			stateUpdates = append(stateUpdates, importStateUpdate{
+				key:   stateKey,
+				state: buildHistoryImportState(commands),
+			})
+		}
+
+		for _, command := range newCommands {
 			allEntries = append(allEntries, db.CommandExecution{
 				Command:  command,
 				SourceOS: runtime.GOOS,
 				Shell:    source.Shell,
 			})
 		}
-		perShell = append(perShell, fmt.Sprintf("  ✓ %s: %d commands (%s)", source.Shell, len(commands), source.DisplayPath()))
+		if limitPerShell == 0 {
+			perShell = append(perShell, fmt.Sprintf("  ✓ %s: %d new / %d total (%s)", source.Shell, len(newCommands), totalCommands, source.DisplayPath()))
+		} else {
+			perShell = append(perShell, fmt.Sprintf("  ✓ %s: %d commands (%s)", source.Shell, len(newCommands), source.DisplayPath()))
+		}
 	}
 
 	if len(allEntries) == 0 {
+		if limitPerShell == 0 {
+			for _, update := range stateUpdates {
+				_ = storage.SaveHistoryImportState(ctx, update.key, update.state)
+			}
+		}
 		return &shellHistoryImportSummary{
 			sources:  sources,
 			perShell: perShell,
@@ -591,6 +648,13 @@ func importShellHistoryEntries(ctx context.Context, storage *db.Storage, limitPe
 			return nil, fmt.Errorf("failed to trim history: %w", err)
 		}
 	}
+	if limitPerShell == 0 {
+		for _, update := range stateUpdates {
+			if err := storage.SaveHistoryImportState(ctx, update.key, update.state); err != nil {
+				return nil, fmt.Errorf("failed to save import state: %w", err)
+			}
+		}
+	}
 
 	return &shellHistoryImportSummary{
 		sources:  sources,
@@ -599,3 +663,101 @@ func importShellHistoryEntries(ctx context.Context, storage *db.Storage, limitPe
 		duration: time.Since(start),
 	}, nil
 }
+
+func shellHistorySourceKey(source shell.HistorySource) string {
+	return strings.Join([]string{
+		source.Shell,
+		string(source.Kind),
+		strings.TrimSpace(source.Path),
+		strings.TrimSpace(source.Command),
+		strings.Join(source.Args, "\x00"),
+	}, "\x1f")
+}
+
+func determineShellImportStart(commands []string, state *db.HistoryImportState) int {
+	if len(commands) == 0 || state == nil {
+		return 0
+	}
+
+	if state.ImportedCount > 0 && state.ImportedCount <= len(commands) && importStateTailMatches(commands, state.ImportedCount, state.TailCommands) {
+		return state.ImportedCount
+	}
+
+	if overlap := findImportOverlap(commands, state.TailCommands); overlap > 0 {
+		return overlap
+	}
+
+	if state.ImportedCount >= len(commands) && importStateTailMatches(commands, len(commands), state.TailCommands) {
+		return len(commands)
+	}
+
+	return 0
+}
+
+func importStateTailMatches(commands []string, end int, tail []string) bool {
+	if end <= 0 || len(commands) == 0 || len(tail) == 0 || end > len(commands) {
+		return false
+	}
+
+	window := minInt(historyImportTailWindow, minInt(end, len(tail)))
+	if window <= 0 {
+		return false
+	}
+
+	left := commands[end-window : end]
+	right := tail[len(tail)-window:]
+	for i := 0; i < window; i++ {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func findImportOverlap(commands []string, tail []string) int {
+	if len(commands) == 0 || len(tail) == 0 {
+		return 0
+	}
+
+	maxWindow := minInt(historyImportTailWindow, minInt(len(commands), len(tail)))
+	for window := maxWindow; window >= 3; window-- {
+		needle := tail[len(tail)-window:]
+		for end := len(commands); end >= window; end-- {
+			match := true
+			for i := 0; i < window; i++ {
+				if commands[end-window+i] != needle[i] {
+					match = false
+					break
+				}
+			}
+			if match {
+				return end
+			}
+		}
+	}
+
+	return 0
+}
+
+func buildHistoryImportState(commands []string) *db.HistoryImportState {
+	state := &db.HistoryImportState{
+		ImportedCount: len(commands),
+		UpdatedAt:     time.Now(),
+	}
+	if len(commands) == 0 {
+		return state
+	}
+
+	window := minInt(historyImportTailWindow, len(commands))
+	state.TailCommands = append([]string(nil), commands[len(commands)-window:]...)
+	return state
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+const historyImportTailWindow = 16
