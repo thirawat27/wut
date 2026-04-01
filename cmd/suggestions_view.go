@@ -2,736 +2,415 @@ package cmd
 
 import (
 	"fmt"
-	"os"
+	"math"
 	"path/filepath"
 	"strings"
-	"time"
 
+	"github.com/atotto/clipboard"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"golang.org/x/term"
+	"github.com/muesli/reflow/truncate"
 
 	appctx "wut/internal/context"
+	"wut/internal/metrics"
 	"wut/internal/smart"
 )
 
-type smartSection struct {
-	Title       string
-	Description string
-	Accent      lipgloss.Color
-	Suggestions []smart.Suggestion
+type smartListModel struct {
+	query       string
+	context     *appctx.Context
+	suggestions []smart.Suggestion
+	cursor      int
+	page        int
+	pageSize    int
+	numPages    int
+	msg         string
+	width       int
+	height      int
 }
 
-type smartBadge struct {
-	Label  string
-	FG     lipgloss.Color
-	BG     lipgloss.Color
-	Border lipgloss.Color
+func showSmartSuggestions(query string, ctx *appctx.Context, suggestions []smart.Suggestion) error {
+	if len(suggestions) == 0 {
+		fmt.Println("No smart suggestions found.")
+		return nil
+	}
+
+	model := newSmartListModel(query, ctx, suggestions)
+	p := tea.NewProgram(model)
+	if _, err := p.Run(); err != nil {
+		return fmt.Errorf("error running smart UI: %w", err)
+	}
+
+	metrics.RecordHistoryView()
+	return nil
 }
 
-func renderSmartView(query string, ctx *appctx.Context, suggestions []smart.Suggestion) {
-	width := smartTerminalWidth()
-
-	fmt.Println()
-	fmt.Println(renderSmartHeader(query, suggestions, width))
-	fmt.Println()
-	fmt.Println(renderSmartContextCard(ctx, width))
-
-	sections := buildSmartSections(suggestions)
-	for _, section := range sections {
-		fmt.Println()
-		fmt.Println(renderSmartSection(section, width))
+func newSmartListModel(query string, ctx *appctx.Context, suggestions []smart.Suggestion) smartListModel {
+	pageSize := 12
+	numPages := int(math.Ceil(float64(len(suggestions)) / float64(pageSize)))
+	if numPages == 0 {
+		numPages = 1
 	}
 
-	fmt.Println()
-	fmt.Println(renderSmartFooter(query, suggestions, width))
+	return smartListModel{
+		query:       query,
+		context:     ctx,
+		suggestions: suggestions,
+		pageSize:    pageSize,
+		numPages:    numPages,
+	}
 }
 
-func smartTerminalWidth() int {
-	width := 96
-	if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-		width = w - 2
-	}
-	if width < 64 {
-		width = 64
-	}
-	if width > 120 {
-		width = 120
-	}
-	return width
+func (m smartListModel) Init() tea.Cmd {
+	return nil
 }
 
-func renderSmartHeader(query string, suggestions []smart.Suggestion, width int) string {
-	titleStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#F8FAFC"))
+func (m smartListModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+	case clearMsg:
+		m.msg = ""
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
+			return m, tea.Quit
+		case "up", "k":
+			if m.cursor > 0 {
+				m.cursor--
+				if m.cursor < m.page*m.pageSize {
+					m.page--
+				}
+			}
+		case "down", "j":
+			if m.cursor < len(m.suggestions)-1 {
+				m.cursor++
+				if m.cursor >= (m.page+1)*m.pageSize {
+					m.page++
+				}
+			}
+		case "left", "h", "pgup":
+			if m.page > 0 {
+				m.page--
+				m.cursor = m.page * m.pageSize
+			}
+		case "right", "l", "pgdown":
+			if m.page < m.numPages-1 {
+				m.page++
+				m.cursor = m.page * m.pageSize
+			}
+		case "enter", "c", "y":
+			if m.cursor >= 0 && m.cursor < len(m.suggestions) {
+				targetCmd := m.suggestions[m.cursor].Command
+				if err := clipboard.WriteAll(targetCmd); err == nil {
+					m.msg = "📋 Copied to clipboard"
+					return m, tickClearMsg()
+				}
+				m.msg = "❌ Copy failed"
+				return m, tickClearMsg()
+			}
+		}
+	}
+	return m, nil
+}
 
-	subtitleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#CBD5E1"))
-
-	topCommand := "No suggestions"
-	if len(suggestions) > 0 {
-		topCommand = suggestions[0].Command
+func (m smartListModel) View() string {
+	if len(m.suggestions) == 0 {
+		return "No smart suggestions found.\n"
 	}
 
-	badges := []string{
-		renderSmartBadge(smartBadge{
-			Label:  smartModeLabel(query),
-			FG:     lipgloss.Color("#E0F2FE"),
-			BG:     lipgloss.Color("#0C4A6E"),
-			Border: lipgloss.Color("#0284C7"),
-		}),
-		renderSmartBadge(smartBadge{
-			Label:  fmt.Sprintf("%d result%s", len(suggestions), smartPlural(len(suggestions))),
-			FG:     lipgloss.Color("#ECFCCB"),
-			BG:     lipgloss.Color("#365314"),
-			Border: lipgloss.Color("#65A30D"),
-		}),
+	start := m.page * m.pageSize
+	end := start + m.pageSize
+	if end > len(m.suggestions) {
+		end = len(m.suggestions)
 	}
 
-	for _, badge := range buildSmartHeaderBadges(suggestions) {
-		badges = append(badges, renderSmartBadge(badge))
+	w := m.width
+	if w <= 0 {
+		w = 100
 	}
 
-	topLine := titleStyle.Render("Smart Suggestions")
-	if query != "" {
-		topLine += "\n" + subtitleStyle.Render(fmt.Sprintf("Query: %s", query))
+	boxPadX := 2
+	if w < 60 {
+		boxPadX = 1
+	}
+
+	boxWidth := w - 2
+	if boxWidth < 30 {
+		boxWidth = 30
+	}
+
+	innerWidth := boxWidth - 2 - (boxPadX * 2)
+	if innerWidth < 24 {
+		innerWidth = 24
+	}
+
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#7C3AED"))
+	queryStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#3B82F6")).Bold(true)
+	metaStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#9CA3AF"))
+	sourceStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#A78BFA"))
+	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280"))
+
+	title := "💡 Smart Suggestions"
+	if strings.TrimSpace(m.query) != "" {
+		title += "  " + queryStyle.Render(m.query)
+	}
+
+	var sb strings.Builder
+	if m.msg != "" {
+		alertText := lipgloss.NewStyle().Foreground(lipgloss.Color("#E5E7EB")).Bold(true).Render(m.msg)
+		alertStr := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#10B981")).
+			Padding(0, 1).
+			Render(alertText)
+
+		titleWidth := lipgloss.Width(title)
+		alertWidth := lipgloss.Width(alertStr)
+		padding := innerWidth - titleWidth - alertWidth
+		if padding < 1 {
+			padding = 1
+		}
+
+		sb.WriteString(lipgloss.JoinHorizontal(lipgloss.Center,
+			headerStyle.Render(title),
+			lipgloss.NewStyle().Width(padding).Render(""),
+			alertStr,
+		))
+		sb.WriteString("\n\n")
 	} else {
-		topLine += "\n" + subtitleStyle.Render("Mode: context-aware recommendations")
+		sb.WriteString(headerStyle.Render(title))
+		sb.WriteString("\n\n")
 	}
 
-	leadLabel := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#93C5FD")).
-		Render("Top match")
+	sb.WriteString(metaStyle.Render(smartContextSummary(m.context)))
+	sb.WriteString("\n\n")
+	if smartLine := smartDifferenceSummary(m.suggestions, innerWidth); smartLine != "" {
+		sb.WriteString(metaStyle.Render(smartLine))
+		sb.WriteString("\n\n")
+	}
 
-	content := strings.Join([]string{
-		topLine,
-		renderSmartBadgeRows(badges, width-8),
-		leadLabel + "\n" + renderSmartPrefixedBlock("  ", topCommand, width-8, lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("#FFFFFF"))),
-	}, "\n\n")
+	indexStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6B7280")).Width(4).Align(lipgloss.Right)
+	showDesc := w >= 80
+	showSource := w >= 65
 
-	return lipgloss.NewStyle().
+	availWidth := innerWidth - 7
+	if showSource {
+		availWidth -= 18
+	}
+	if availWidth < 12 {
+		availWidth = 12
+	}
+
+	for i := start; i < end; i++ {
+		suggestion := m.suggestions[i]
+		cursor := "  "
+		cmdStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#10B981"))
+		if m.cursor == i {
+			cursor = "👉"
+			cmdStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Background(lipgloss.Color("#3B82F6")).
+				Padding(0, 1)
+		}
+
+		command := suggestion.Command
+		if lipgloss.Width(command) > availWidth {
+			command = truncate.StringWithTail(command, uint(availWidth), "...")
+		}
+
+		sourceLabel := ""
+		if showSource {
+			sourceLabel = sourceStyle.Render("["+compactSuggestionSource(suggestion.Source)+"]") + "  "
+		}
+
+		sb.WriteString(fmt.Sprintf("%s %s %s%s\n", cursor, indexStyle.Render(fmt.Sprintf("%d.", i+1)), sourceLabel, cmdStyle.Render(command)))
+
+		if showDesc {
+			if extra := smartSuggestionMeta(suggestion, innerWidth-6); extra != "" {
+				sb.WriteString("      " + descStyle.Render(extra) + "\n")
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(metaStyle.Render(fmt.Sprintf("Showing %d suggestions total.", len(m.suggestions))))
+	sb.WriteString("\n\n")
+
+	footerStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EAB308")).Bold(true)
+	sb.WriteString(footerStyle.Render(fmt.Sprintf("Page %d/%d", m.page+1, m.numPages)))
+
+	var footerNav string
+	if w >= 90 {
+		footerNav = " | [↑/↓] Navigate | [←/→] Prev/Next Page | [c/enter] Copy | [q] Quit"
+	} else if w >= 60 {
+		footerNav = " | ↑/↓ nav | ←/→ page | c copy | q quit"
+	} else {
+		footerNav = " | ↑/↓ | ←/→ | c | q"
+	}
+	sb.WriteString(metaStyle.Render(footerNav + "\n"))
+
+	boxStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#2563EB")).
-		Background(lipgloss.Color("#0F172A")).
-		Padding(1, 2).
-		Width(width).
-		Render(content)
+		BorderForeground(lipgloss.Color("#7C3AED")).
+		Padding(1, boxPadX).
+		Width(boxWidth)
+
+	return boxStyle.Render(strings.TrimRight(sb.String(), "\n"))
 }
 
-func renderSmartContextCard(ctx *appctx.Context, width int) string {
+func smartContextSummary(ctx *appctx.Context) string {
 	if ctx == nil {
-		return ""
+		return "No context available"
 	}
 
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#E2E8F0")).
-		Render("Current Context")
-
+	parts := []string{}
 	workspace := filepath.Base(ctx.WorkingDir)
 	if workspace == "." || workspace == "/" || workspace == "\\" || workspace == "" {
 		workspace = ctx.WorkingDir
 	}
-
-	pills := []string{
-		renderSmartBadge(smartBadge{
-			Label:  "Workspace " + workspace,
-			FG:     lipgloss.Color("#EDE9FE"),
-			BG:     lipgloss.Color("#4C1D95"),
-			Border: lipgloss.Color("#7C3AED"),
-		}),
-		renderSmartBadge(smartBadge{
-			Label:  "Type " + smartContextValue(ctx.ProjectType, "unknown"),
-			FG:     lipgloss.Color("#D1FAE5"),
-			BG:     lipgloss.Color("#064E3B"),
-			Border: lipgloss.Color("#10B981"),
-		}),
-		renderSmartBadge(smartBadge{
-			Label:  "Shell " + smartDisplayContextToken(ctx.Shell, "unknown"),
-			FG:     lipgloss.Color("#E0F2FE"),
-			BG:     lipgloss.Color("#0C4A6E"),
-			Border: lipgloss.Color("#0891B2"),
-		}),
-		renderSmartBadge(smartBadge{
-			Label:  "OS " + smartContextValue(ctx.OS, "unknown"),
-			FG:     lipgloss.Color("#FDE68A"),
-			BG:     lipgloss.Color("#78350F"),
-			Border: lipgloss.Color("#D97706"),
-		}),
+	if workspace != "" {
+		parts = append(parts, "Project: "+workspace)
 	}
-
+	if ctx.ProjectType != "" && ctx.ProjectType != "unknown" {
+		parts = append(parts, "Type: "+ctx.ProjectType)
+	}
+	if ctx.Shell != "" {
+		parts = append(parts, "Shell: "+strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(ctx.Shell, ".exe"), ".cmd"), ".bat"))
+	}
+	if ctx.OS != "" {
+		parts = append(parts, "OS: "+ctx.OS)
+	}
 	if ctx.IsGitRepo {
-		pills = append(pills, renderSmartBadge(smartBadge{
-			Label:  "Branch " + smartContextValue(ctx.GitBranch, "detached"),
-			FG:     lipgloss.Color("#DCFCE7"),
-			BG:     lipgloss.Color("#14532D"),
-			Border: lipgloss.Color("#16A34A"),
-		}))
-
+		if ctx.GitBranch != "" {
+			parts = append(parts, "Branch: "+ctx.GitBranch)
+		}
 		if ctx.GitStatus.IsClean {
-			pills = append(pills, renderSmartBadge(smartBadge{
-				Label:  "Clean",
-				FG:     lipgloss.Color("#D1FAE5"),
-				BG:     lipgloss.Color("#064E3B"),
-				Border: lipgloss.Color("#10B981"),
-			}))
+			parts = append(parts, "Clean")
 		} else {
-			pills = append(pills, renderSmartBadge(smartBadge{
-				Label:  "Dirty",
-				FG:     lipgloss.Color("#FDE68A"),
-				BG:     lipgloss.Color("#78350F"),
-				Border: lipgloss.Color("#F59E0B"),
-			}))
-		}
-
-		if ctx.GitStatus.Ahead > 0 {
-			pills = append(pills, renderSmartBadge(smartBadge{
-				Label:  fmt.Sprintf("Ahead %d", ctx.GitStatus.Ahead),
-				FG:     lipgloss.Color("#DBEAFE"),
-				BG:     lipgloss.Color("#1E3A8A"),
-				Border: lipgloss.Color("#3B82F6"),
-			}))
-		}
-		if ctx.GitStatus.Behind > 0 {
-			pills = append(pills, renderSmartBadge(smartBadge{
-				Label:  fmt.Sprintf("Behind %d", ctx.GitStatus.Behind),
-				FG:     lipgloss.Color("#FECACA"),
-				BG:     lipgloss.Color("#7F1D1D"),
-				Border: lipgloss.Color("#EF4444"),
-			}))
+			parts = append(parts, "Dirty")
 		}
 	}
-
-	pathLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#94A3B8")).
-		Render(ctx.WorkingDir)
-
-	content := strings.Join([]string{
-		title,
-		renderSmartBadgeRows(pills, width-8),
-		pathLine,
-	}, "\n\n")
-
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Padding(1, 2).
-		Width(width).
-		Render(content)
+	return strings.Join(parts, "  |  ")
 }
 
-func buildSmartSections(suggestions []smart.Suggestion) []smartSection {
-	if len(suggestions) == 0 {
-		return nil
+func compactSuggestionSource(source string) string {
+	source = strings.TrimSpace(source)
+	switch {
+	case strings.Contains(source, "Smart History"):
+		return "history"
+	case strings.Contains(source, "Context"):
+		return "context"
+	case strings.Contains(source, "Quick"):
+		return "quick"
+	case strings.Contains(source, "Command DB"):
+		return "reference"
+	case strings.Contains(source, "Fuzzy"):
+		return "fuzzy"
+	default:
+		return strings.ToLower(source)
 	}
-
-	sections := []smartSection{
-		{
-			Title:       "Best Match",
-			Description: "Highest-confidence suggestion after scoring all sources.",
-			Accent:      lipgloss.Color("#22C55E"),
-			Suggestions: []smart.Suggestion{suggestions[0]},
-		},
-	}
-
-	grouped := map[string][]smart.Suggestion{
-		"History":   {},
-		"Context":   {},
-		"Reference": {},
-		"Explore":   {},
-		"Other":     {},
-	}
-
-	for _, suggestion := range suggestions[1:] {
-		grouped[smartSuggestionBucket(suggestion)] = append(grouped[smartSuggestionBucket(suggestion)], suggestion)
-	}
-
-	appendSection := func(key, title, description string, accent lipgloss.Color) {
-		if len(grouped[key]) == 0 {
-			return
-		}
-		sections = append(sections, smartSection{
-			Title:       title,
-			Description: description,
-			Accent:      accent,
-			Suggestions: grouped[key],
-		})
-	}
-
-	appendSection("History", "From Your History", "Commands you actually ran before, ranked by fit and freshness.", lipgloss.Color("#8B5CF6"))
-	appendSection("Context", "Contextual Picks", "Commands inferred from the current repo, branch, and project type.", lipgloss.Color("#06B6D4"))
-	appendSection("Reference", "Command Reference", "Suggestions pulled from the local command catalog / TLDR cache.", lipgloss.Color("#F59E0B"))
-	appendSection("Explore", "Explore", "Loose matches and discovery-oriented suggestions.", lipgloss.Color("#64748B"))
-	appendSection("Other", "Other Matches", "Suggestions that did not fit the primary buckets.", lipgloss.Color("#94A3B8"))
-
-	return sections
 }
 
-func renderSmartSection(section smartSection, width int) string {
-	title := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(section.Accent).
-		Render(section.Title)
-
-	count := renderSmartBadge(smartBadge{
-		Label:  fmt.Sprintf("%d", len(section.Suggestions)),
-		FG:     lipgloss.Color("#E2E8F0"),
-		BG:     lipgloss.Color("#1E293B"),
-		Border: section.Accent,
-	})
-
-	header := title + " " + count
-	if section.Description != "" {
-		header += "\n" + lipgloss.NewStyle().Foreground(lipgloss.Color("#94A3B8")).Render(section.Description)
+func smartSuggestionMeta(suggestion smart.Suggestion, width int) string {
+	parts := make([]string, 0, 4)
+	if suggestion.Description != "" {
+		parts = append(parts, suggestion.Description)
 	}
-
-	parts := []string{header}
-	for i, suggestion := range section.Suggestions {
-		parts = append(parts, renderSmartSuggestionCard(i+1, suggestion, width, i == 0 && section.Title == "Best Match", section.Accent))
-	}
-
-	return strings.Join(parts, "\n\n")
-}
-
-func renderSmartSuggestionCard(rank int, suggestion smart.Suggestion, width int, featured bool, accent lipgloss.Color) string {
-	cardWidth := width
-	contentWidth := width - 8
-	if contentWidth < 40 {
-		contentWidth = 40
-	}
-
-	rankBadge := renderSmartBadge(smartBadge{
-		Label:  fmt.Sprintf("#%d", rank),
-		FG:     lipgloss.Color("#F8FAFC"),
-		BG:     accent,
-		Border: accent,
-	})
-
-	commandStyle := lipgloss.NewStyle().
-		Bold(true).
-		Foreground(lipgloss.Color("#FFFFFF"))
-	if featured {
-		commandStyle = commandStyle.Foreground(lipgloss.Color("#DCFCE7"))
-	}
-
-	header := renderSmartPrefixedBlock(rankBadge+"  ", suggestion.Command, contentWidth, commandStyle)
-
-	badges := []string{
-		renderSmartBadge(smartConfidenceBadge(suggestion, featured)),
-	}
-	for _, badge := range smartSourceBadges(suggestion.Source) {
-		badges = append(badges, renderSmartBadge(badge))
+	if hint := smartSuggestionHint(suggestion); hint != "" {
+		parts = append(parts, hint)
 	}
 	if suggestion.IsPerfectMatch {
-		badges = append(badges, renderSmartBadge(smartBadge{
-			Label:  "Exact",
-			FG:     lipgloss.Color("#DCFCE7"),
-			BG:     lipgloss.Color("#14532D"),
-			Border: lipgloss.Color("#16A34A"),
-		}))
+		parts = append(parts, "exact")
 	}
 	if suggestion.ContextMatch >= 0.3 {
-		badges = append(badges, renderSmartBadge(smartBadge{
-			Label:  "Local context",
-			FG:     lipgloss.Color("#E0F2FE"),
-			BG:     lipgloss.Color("#164E63"),
-			Border: lipgloss.Color("#06B6D4"),
-		}))
+		parts = append(parts, "local context")
 	}
 	if suggestion.UsageCount > 1 {
-		badges = append(badges, renderSmartBadge(smartBadge{
-			Label:  fmt.Sprintf("Used %d times", suggestion.UsageCount),
-			FG:     lipgloss.Color("#EDE9FE"),
-			BG:     lipgloss.Color("#4C1D95"),
-			Border: lipgloss.Color("#8B5CF6"),
-		}))
+		parts = append(parts, fmt.Sprintf("used %d times", suggestion.UsageCount))
 	}
-	if age := smartRelativeAgeShort(suggestion.LastUsed); age != "" {
-		badges = append(badges, renderSmartBadge(smartBadge{
-			Label:  age,
-			FG:     lipgloss.Color("#CBD5E1"),
-			BG:     lipgloss.Color("#1F2937"),
-			Border: lipgloss.Color("#475569"),
-		}))
+	if meta := strings.Join(parts, "  ·  "); meta != "" {
+		if width > 0 && lipgloss.Width(meta) > width {
+			return truncate.StringWithTail(meta, uint(width), "...")
+		}
+		return meta
+	}
+	return ""
+}
+
+func smartDifferenceSummary(suggestions []smart.Suggestion, width int) string {
+	if len(suggestions) == 0 {
+		return ""
+	}
+
+	historyCount := 0
+	contextCount := 0
+	referenceCount := 0
+	exploreCount := 0
+	var bestNonHistory string
+
+	for _, suggestion := range suggestions {
+		switch compactSuggestionSource(suggestion.Source) {
+		case "history":
+			historyCount++
+		case "context", "quick":
+			contextCount++
+			if bestNonHistory == "" {
+				bestNonHistory = suggestion.Command
+			}
+		case "reference":
+			referenceCount++
+			if bestNonHistory == "" {
+				bestNonHistory = suggestion.Command
+			}
+		case "fuzzy", "common":
+			exploreCount++
+			if bestNonHistory == "" {
+				bestNonHistory = suggestion.Command
+			}
+		default:
+			if bestNonHistory == "" && !strings.Contains(strings.ToLower(suggestion.Source), "history") {
+				bestNonHistory = suggestion.Command
+			}
+		}
 	}
 
 	parts := []string{
-		header,
-		renderSmartBadgeRows(badges, contentWidth),
+		fmt.Sprintf("Smart layer: %d history", historyCount),
 	}
-	if suggestion.Description != "" {
-		desc := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#94A3B8")).
-			Render(wrapText(suggestion.Description, contentWidth))
-		parts = append(parts, desc)
+	if contextCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d context", contextCount))
 	}
-
-	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(accent).
-		Padding(0, 1).
-		Width(cardWidth)
-
-	if featured {
-		style = style.Background(lipgloss.Color("#0B1220"))
+	if referenceCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d reference", referenceCount))
+	}
+	if exploreCount > 0 {
+		parts = append(parts, fmt.Sprintf("%d explore", exploreCount))
+	}
+	if bestNonHistory != "" {
+		parts = append(parts, "best new idea: "+bestNonHistory)
 	}
 
-	return style.Render(strings.Join(parts, "\n\n"))
+	summary := strings.Join(parts, "  |  ")
+	if width > 0 && lipgloss.Width(summary) > width {
+		return truncate.StringWithTail(summary, uint(width), "...")
+	}
+	return summary
 }
 
-func renderSmartFooter(query string, suggestions []smart.Suggestion, width int) string {
-	tips := []string{
-		"Use `wut ? \"<query>\"` for a fast shortcut.",
-	}
-	if query != "" {
-		tips = append(tips, fmt.Sprintf("Need raw log matches too? Run `wut history --search %q`.", query))
-	} else {
-		tips = append(tips, "Add a short query like `git status` or `docker logs` to focus the ranking.")
-	}
-	if len(suggestions) > 0 {
-		tips = append(tips, "The first card is the highest-confidence pick after merging history, context, and catalog signals.")
-	}
-
-	content := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#94A3B8")).
-		Render("Tips\n" + wrapText(strings.Join(tips, "  "), width-8))
-
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#334155")).
-		Padding(1, 2).
-		Width(width).
-		Render(content)
-}
-
-func buildSmartHeaderBadges(suggestions []smart.Suggestion) []smartBadge {
-	counts := make(map[string]int)
-	for _, suggestion := range suggestions {
-		counts[smartSuggestionBucket(suggestion)]++
-	}
-
-	order := []struct {
-		Key   string
-		Label string
-		Color lipgloss.Color
-	}{
-		{Key: "History", Label: "History", Color: lipgloss.Color("#8B5CF6")},
-		{Key: "Context", Label: "Context", Color: lipgloss.Color("#06B6D4")},
-		{Key: "Reference", Label: "Reference", Color: lipgloss.Color("#F59E0B")},
-		{Key: "Explore", Label: "Explore", Color: lipgloss.Color("#64748B")},
-	}
-
-	badges := make([]smartBadge, 0, len(order))
-	for _, item := range order {
-		if counts[item.Key] == 0 {
-			continue
-		}
-		badges = append(badges, smartBadge{
-			Label:  fmt.Sprintf("%s %d", item.Label, counts[item.Key]),
-			FG:     lipgloss.Color("#E2E8F0"),
-			BG:     lipgloss.Color("#1E293B"),
-			Border: item.Color,
-		})
-	}
-	return badges
-}
-
-func smartSourceBadges(source string) []smartBadge {
-	parts := strings.Split(source, " + ")
-	badges := make([]smartBadge, 0, len(parts))
-	seen := make(map[string]struct{}, len(parts))
-	for _, part := range parts {
-		label, badge := smartSourceBadge(part)
-		if label == "" {
-			continue
-		}
-		if _, ok := seen[label]; ok {
-			continue
-		}
-		seen[label] = struct{}{}
-		badges = append(badges, badge)
-	}
-	return badges
-}
-
-func smartSourceBadge(source string) (string, smartBadge) {
-	switch {
-	case strings.Contains(source, "Smart History"):
-		return "History", smartBadge{
-			Label:  "History",
-			FG:     lipgloss.Color("#EDE9FE"),
-			BG:     lipgloss.Color("#4C1D95"),
-			Border: lipgloss.Color("#8B5CF6"),
-		}
-	case strings.Contains(source, "Context"):
-		return "Context", smartBadge{
-			Label:  "Context",
-			FG:     lipgloss.Color("#E0F2FE"),
-			BG:     lipgloss.Color("#164E63"),
-			Border: lipgloss.Color("#06B6D4"),
-		}
-	case strings.Contains(source, "Quick"):
-		return "Quick", smartBadge{
-			Label:  "Quick",
-			FG:     lipgloss.Color("#DBEAFE"),
-			BG:     lipgloss.Color("#1E3A8A"),
-			Border: lipgloss.Color("#3B82F6"),
-		}
-	case strings.Contains(source, "Command DB"):
-		return "Reference", smartBadge{
-			Label:  "Reference",
-			FG:     lipgloss.Color("#FEF3C7"),
-			BG:     lipgloss.Color("#78350F"),
-			Border: lipgloss.Color("#F59E0B"),
-		}
-	case strings.Contains(source, "Fuzzy"):
-		return "Fuzzy", smartBadge{
-			Label:  "Fuzzy",
-			FG:     lipgloss.Color("#E2E8F0"),
-			BG:     lipgloss.Color("#334155"),
-			Border: lipgloss.Color("#64748B"),
-		}
-	case strings.Contains(source, "Common"):
-		return "Common", smartBadge{
-			Label:  "Common",
-			FG:     lipgloss.Color("#E2E8F0"),
-			BG:     lipgloss.Color("#334155"),
-			Border: lipgloss.Color("#94A3B8"),
-		}
+func smartSuggestionHint(suggestion smart.Suggestion) string {
+	switch compactSuggestionSource(suggestion.Source) {
+	case "context":
+		return "context pick"
+	case "quick":
+		return "workflow shortcut"
+	case "reference":
+		return "not required in your history"
+	case "fuzzy":
+		return "discovery match"
 	default:
-		cleaned := strings.TrimSpace(source)
-		return cleaned, smartBadge{
-			Label:  cleaned,
-			FG:     lipgloss.Color("#E2E8F0"),
-			BG:     lipgloss.Color("#1F2937"),
-			Border: lipgloss.Color("#475569"),
-		}
-	}
-}
-
-func smartConfidenceBadge(suggestion smart.Suggestion, featured bool) smartBadge {
-	switch {
-	case featured || suggestion.IsPerfectMatch || suggestion.Score >= 2.3:
-		return smartBadge{
-			Label:  "Top",
-			FG:     lipgloss.Color("#DCFCE7"),
-			BG:     lipgloss.Color("#14532D"),
-			Border: lipgloss.Color("#22C55E"),
-		}
-	case suggestion.Score >= 1.4:
-		return smartBadge{
-			Label:  "Strong",
-			FG:     lipgloss.Color("#DBEAFE"),
-			BG:     lipgloss.Color("#1E3A8A"),
-			Border: lipgloss.Color("#3B82F6"),
-		}
-	case suggestion.Score >= 0.85:
-		return smartBadge{
-			Label:  "Good",
-			FG:     lipgloss.Color("#FEF3C7"),
-			BG:     lipgloss.Color("#78350F"),
-			Border: lipgloss.Color("#F59E0B"),
-		}
-	default:
-		return smartBadge{
-			Label:  "Related",
-			FG:     lipgloss.Color("#E2E8F0"),
-			BG:     lipgloss.Color("#334155"),
-			Border: lipgloss.Color("#64748B"),
-		}
-	}
-}
-
-func smartSuggestionBucket(suggestion smart.Suggestion) string {
-	source := suggestion.Source
-	switch {
-	case strings.Contains(source, "Smart History"):
-		return "History"
-	case strings.Contains(source, "Context"), strings.Contains(source, "Quick"):
-		return "Context"
-	case strings.Contains(source, "Command DB"):
-		return "Reference"
-	case strings.Contains(source, "Fuzzy"), strings.Contains(source, "Common"):
-		return "Explore"
-	default:
-		return "Other"
-	}
-}
-
-func smartModeLabel(query string) string {
-	if strings.TrimSpace(query) == "" {
-		return "For current context"
-	}
-	return "Focused search"
-}
-
-func smartContextValue(value, fallback string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func smartDisplayContextToken(value, fallback string) string {
-	value = smartContextValue(value, fallback)
-	value = strings.TrimSuffix(value, ".exe")
-	value = strings.TrimSuffix(value, ".cmd")
-	value = strings.TrimSuffix(value, ".bat")
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func smartRelativeAgeShort(ts time.Time) string {
-	if ts.IsZero() {
 		return ""
 	}
-	delta := time.Since(ts)
-	switch {
-	case delta < time.Hour:
-		return "Seen <1h"
-	case delta < 24*time.Hour:
-		return fmt.Sprintf("Seen %dh", int(delta.Hours()+0.5))
-	case delta < 30*24*time.Hour:
-		return fmt.Sprintf("Seen %dd", int(delta.Hours()/24+0.5))
-	default:
-		return fmt.Sprintf("Seen %dmo", int(delta.Hours()/(24*30)+0.5))
-	}
-}
-
-func renderSmartPrefixedBlock(prefix, text string, width int, style lipgloss.Style) string {
-	textWidth := width - lipgloss.Width(prefix)
-	if textWidth < 16 {
-		textWidth = 16
-	}
-	lines := strings.Split(wrapText(text, textWidth), "\n")
-	if len(lines) == 0 {
-		return prefix
-	}
-
-	padding := strings.Repeat(" ", lipgloss.Width(prefix))
-	rendered := make([]string, 0, len(lines))
-	for i, line := range lines {
-		if i == 0 {
-			rendered = append(rendered, prefix+style.Render(line))
-			continue
-		}
-		rendered = append(rendered, padding+style.Render(line))
-	}
-	return strings.Join(rendered, "\n")
-}
-
-func renderSmartBadgeRows(items []string, width int) string {
-	if len(items) == 0 {
-		return ""
-	}
-
-	lines := []string{}
-	current := []string{}
-	currentWidth := 0
-
-	for _, item := range items {
-		itemWidth := lipgloss.Width(item)
-		if len(current) > 0 && currentWidth+1+itemWidth > width {
-			lines = append(lines, strings.Join(current, " "))
-			current = current[:0]
-			currentWidth = 0
-		}
-		if len(current) > 0 {
-			currentWidth++
-		}
-		current = append(current, item)
-		currentWidth += itemWidth
-	}
-
-	if len(current) > 0 {
-		lines = append(lines, strings.Join(current, " "))
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func renderSmartBadge(badge smartBadge) string {
-	return lipgloss.NewStyle().
-		Bold(true).
-		Foreground(badge.FG).
-		Background(badge.BG).
-		Padding(0, 1).
-		MarginRight(0).
-		Render(badge.Label)
-}
-
-func wrapText(text string, width int) string {
-	text = strings.TrimSpace(text)
-	if text == "" || width <= 0 {
-		return text
-	}
-
-	words := strings.Fields(text)
-	if len(words) == 0 {
-		return text
-	}
-
-	lines := make([]string, 0, len(words)/3+1)
-	current := words[0]
-
-	for _, word := range words[1:] {
-		candidate := current + " " + word
-		if lipgloss.Width(candidate) <= width {
-			current = candidate
-			continue
-		}
-
-		if lipgloss.Width(word) > width {
-			if current != "" {
-				lines = append(lines, current)
-			}
-			lines = append(lines, smartHardWrap(word, width)...)
-			current = ""
-			continue
-		}
-
-		if current != "" {
-			lines = append(lines, current)
-		}
-		current = word
-	}
-
-	if current != "" {
-		lines = append(lines, current)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
-func smartHardWrap(text string, width int) []string {
-	if width <= 0 || text == "" {
-		return []string{text}
-	}
-
-	runes := []rune(text)
-	if len(runes) <= width {
-		return []string{text}
-	}
-
-	lines := make([]string, 0, len(runes)/width+1)
-	for len(runes) > width {
-		lines = append(lines, string(runes[:width]))
-		runes = runes[width:]
-	}
-	if len(runes) > 0 {
-		lines = append(lines, string(runes))
-	}
-	return lines
-}
-
-func smartPlural(n int) string {
-	if n == 1 {
-		return ""
-	}
-	return "s"
 }

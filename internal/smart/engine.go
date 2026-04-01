@@ -94,7 +94,7 @@ func (e *Engine) SetWeights(weights ScoringWeights) {
 
 // Suggest returns intelligent command suggestions
 func (e *Engine) Suggest(ctx context.Context, query string, contextData *appctx.Context, limit int) ([]Suggestion, error) {
-	if limit <= 0 {
+	if limit < 0 {
 		limit = 10
 	}
 	if contextData == nil {
@@ -264,16 +264,15 @@ func (e *Engine) getHistoryLogSuggestions(ctx context.Context, query string, lim
 	if e.storage == nil {
 		return nil
 	}
-	if limit <= 0 {
-		limit = 10
-	}
-
-	searchLimit := limit * 50
-	if searchLimit < 150 {
-		searchLimit = 150
-	}
-	if searchLimit > 500 {
-		searchLimit = 500
+	searchLimit := 0
+	if limit > 0 {
+		searchLimit = limit * 50
+		if searchLimit < 150 {
+			searchLimit = 150
+		}
+		if searchLimit > 500 {
+			searchLimit = 500
+		}
 	}
 
 	matches, err := e.storage.SearchHistoryMatches(ctx, query, searchLimit)
@@ -338,7 +337,7 @@ func (e *Engine) getHistoryLogSuggestions(ctx context.Context, query string, lim
 		return results[i].Score > results[j].Score
 	})
 
-	if len(results) > limit*3 {
+	if limit > 0 && len(results) > limit*3 {
 		results = results[:limit*3]
 	}
 
@@ -478,9 +477,6 @@ func (e *Engine) getCatalogSuggestions(ctx context.Context, query string, limit 
 	if e.storage == nil || strings.TrimSpace(query) == "" {
 		return nil
 	}
-	if limit <= 0 {
-		limit = 10
-	}
 
 	suggestionMap := make(map[string]Suggestion)
 	addSuggestion := func(s Suggestion) {
@@ -502,13 +498,17 @@ func (e *Engine) getCatalogSuggestions(ctx context.Context, query string, limit 
 				Icon:         "📚",
 				ContextMatch: 0.15,
 			})
-			if len(suggestionMap) >= limit*4 {
+			if limit > 0 && len(suggestionMap) >= limit*4 {
 				break
 			}
 		}
 	}
 
-	pages, err := e.storage.SearchLocalLimited(query, limit*6)
+	searchPageLimit := 0
+	if limit > 0 {
+		searchPageLimit = limit * 6
+	}
+	pages, err := e.storage.SearchLocalLimited(query, searchPageLimit)
 	if err == nil {
 		for _, page := range pages {
 			match := e.matcher.Match(strings.ToLower(query), strings.ToLower(page.Name+" "+page.Description))
@@ -536,7 +536,7 @@ func (e *Engine) getCatalogSuggestions(ctx context.Context, query string, limit 
 		return results[i].Score > results[j].Score
 	})
 
-	if len(results) > limit*3 {
+	if limit > 0 && len(results) > limit*3 {
 		results = results[:limit*3]
 	}
 	return results
@@ -668,6 +668,9 @@ func (e *Engine) calculateFinalScore(s Suggestion, query string, ctx *appctx.Con
 
 // limitSuggestions limits the number of suggestions
 func (e *Engine) limitSuggestions(suggestions []Suggestion, limit int) []Suggestion {
+	if limit <= 0 {
+		return suggestions
+	}
 	if len(suggestions) <= limit {
 		return suggestions
 	}
@@ -952,7 +955,7 @@ func normalizeSmartToken(value string) string {
 
 // GetFallbackSuggestions returns fallback suggestions when normal flow fails
 func (e *Engine) GetFallbackSuggestions(ctx *appctx.Context, limit int) []Suggestion {
-	if limit <= 0 {
+	if limit < 0 {
 		limit = 10
 	}
 

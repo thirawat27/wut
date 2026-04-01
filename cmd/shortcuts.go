@@ -270,7 +270,7 @@ func smartShortcutCmd() *cobra.Command {
 
 	cmd.Flags().BoolP("exec", "e", false, "execute selected command")
 	cmd.Flags().BoolP("correct", "c", true, "auto-correct typos")
-	cmd.Flags().IntP("limit", "l", 10, "maximum suggestions to show")
+	cmd.Flags().IntP("limit", "l", 0, "maximum suggestions to show (0 = unlimited)")
 
 	return cmd
 }

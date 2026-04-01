@@ -41,7 +41,7 @@ var (
 func init() {
 	rootCmd.AddCommand(smartCmd)
 
-	smartCmd.Flags().IntVarP(&smartLimit, "limit", "l", 10, "maximum suggestions to show")
+	smartCmd.Flags().IntVarP(&smartLimit, "limit", "l", 0, "maximum suggestions to show (0 = unlimited)")
 	smartCmd.Flags().BoolVarP(&smartExec, "exec", "e", false, "execute selected command")
 	smartCmd.Flags().BoolVarP(&smartCorrect, "correct", "c", true, "auto-correct typos")
 }
@@ -109,6 +109,10 @@ func runSmart(cmd *cobra.Command, args []string) error {
 
 	// Create smart engine
 	engine := smart.NewEngine(storage)
+	fetchLimit := smartLimit
+	if fetchLimit > 0 && fetchLimit < 120 {
+		fetchLimit = 120
+	}
 
 	// Get intelligent suggestions with timeout
 	suggestionsCh := make(chan []smart.Suggestion, 1)
@@ -120,7 +124,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 				log.Error("panic in suggest", "recover", r)
 			}
 		}()
-		sugs, err := engine.Suggest(ctx, query, appCtx, smartLimit)
+		sugs, err := engine.Suggest(ctx, query, appCtx, fetchLimit)
 		if err != nil {
 			suggestErr = err
 			return
@@ -153,9 +157,7 @@ func runSmart(cmd *cobra.Command, args []string) error {
 		suggestions = engine.GetFallbackSuggestions(appCtx, smartLimit)
 	}
 
-	renderSmartView(query, appCtx, suggestions)
-
-	return nil
+	return showSmartSuggestions(query, appCtx, suggestions)
 }
 
 func openSmartStorage(log *logger.Logger) *db.Storage {
