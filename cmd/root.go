@@ -165,7 +165,7 @@ func setupPremiumHelp(cmd *cobra.Command) {
 				bannerStyle = bannerStyle.Width(termWidth - 2)
 			}
 
-			desc := "⚡ WUT (What ?)\nThe Smart Command Line Assistant That Actually Understands You"
+			desc := "⚡ WUT (What?)\nThe smart command line assistant that understands what you mean"
 			fmt.Printf("\n%s\n", bannerStyle.Render(desc))
 			fmt.Println(ui.Mascot())
 		} else {

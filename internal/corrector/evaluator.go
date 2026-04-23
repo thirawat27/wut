@@ -158,7 +158,7 @@ func (c *Corrector) evaluateErrorRules(command string) *Correction {
 	}
 
 	// We'll execute the given command with a short timeout to grab its error output.
-	// This is the core engine to "kill" `thefuck` without reading history dynamically.
+	// This is the core engine for shell error-aware correction without relying on dynamic history reads.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 

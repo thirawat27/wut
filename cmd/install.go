@@ -21,6 +21,7 @@ var installCmd = &cobra.Command{
 This command sets up key bindings for your shell to quickly access WUT:
 - Ctrl+Space: Open WUT TUI
 - Ctrl+G: Open WUT with current command line
+- oops: Retry the last command with WUT's best correction
 
 Supports live integration for: bash, zsh, fish, powershell, pwsh, nushell, xonsh, elvish, cmd`,
 	Example: `  wut install           # Install for all detected shells (default)
@@ -98,6 +99,7 @@ func installShellIntegration(sh string) error {
 	fmt.Println("Key bindings:")
 	fmt.Println("  • Ctrl+Space - Open WUT TUI")
 	fmt.Println("  • Ctrl+G     - Open WUT with current command")
+	fmt.Println("  • oops       - Retry the last command with WUT correction")
 	fmt.Println()
 	if configFile, err := shell.GetConfigFile(sh); err == nil {
 		if reloadCmd := shell.GetReloadCommand(sh, configFile); reloadCmd != "" {

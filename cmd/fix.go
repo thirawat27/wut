@@ -28,8 +28,10 @@ WUT will detect typos, dangerous commands, and suggest alternatives.`,
 }
 
 var (
-	fixCopy bool
-	fixList bool
+	fixCopy      bool
+	fixList      bool
+	fixExec      bool
+	fixShellMode bool
 )
 
 func init() {
@@ -37,26 +39,30 @@ func init() {
 
 	fixCmd.Flags().BoolVarP(&fixCopy, "copy", "c", false, "copy corrected command to clipboard")
 	fixCmd.Flags().BoolVarP(&fixList, "list", "l", false, "list common typos")
+	fixCmd.Flags().BoolVarP(&fixExec, "exec", "e", false, "execute corrected command")
+	fixCmd.Flags().BoolVar(&fixShellMode, "shell", false, "output corrected command only for shell integration")
+	_ = fixCmd.Flags().MarkHidden("shell")
 }
 
 func runFix(cmd *cobra.Command, args []string) error {
 	// 1. Setup storage and corrector
 	store, err := db.NewStorage(config.GetDatabasePath())
-	if err != nil {
-		return fmt.Errorf("failed to open database: %w", err)
+	if err == nil {
+		defer store.Close()
+		hydrateHistoryFromShell(context.Background(), store)
 	}
-	defer store.Close()
-	hydrateHistoryFromShell(context.Background(), store)
 
 	c := corrector.New()
 
 	// Populate corrector with history for better fuzzy matching
-	if history, err := store.GetHistory(context.Background(), 100); err == nil {
-		var historyCmds []string
-		for _, h := range history {
-			historyCmds = append(historyCmds, h.Command)
+	if store != nil {
+		if history, err := store.GetHistory(context.Background(), 100); err == nil {
+			var historyCmds []string
+			for _, h := range history {
+				historyCmds = append(historyCmds, h.Command)
+			}
+			c.SetHistoryCommands(historyCmds)
 		}
-		c.SetHistoryCommands(historyCmds)
 	}
 
 	// 2. Handle --list flag
@@ -68,7 +74,7 @@ func runFix(cmd *cobra.Command, args []string) error {
 	input := ""
 	if len(args) > 0 {
 		input = strings.Join(args, " ")
-	} else {
+	} else if store != nil {
 		// Fetch last command from history (skipping 'wut' commands)
 		history, err := store.GetHistory(context.Background(), 10)
 		if err == nil {
@@ -83,11 +89,22 @@ func runFix(cmd *cobra.Command, args []string) error {
 	}
 
 	if input == "" {
+		if store == nil {
+			return fmt.Errorf("no command provided and history database is unavailable")
+		}
 		return fmt.Errorf("no command provided and no recent history found to fix")
 	}
 
 	// 4a. Detect if input looks like natural language → run semantic engine
 	if looksLikeNaturalLanguage(input) {
+		if fixShellMode {
+			best, err := bestSemanticMatch(input)
+			if err != nil {
+				return err
+			}
+			fmt.Println(best)
+			return nil
+		}
 		return runSemanticSearch(input)
 	}
 
@@ -98,6 +115,10 @@ func runFix(cmd *cobra.Command, args []string) error {
 	}
 
 	if correction == nil {
+		if fixShellMode {
+			return fmt.Errorf("no correction needed")
+		}
+
 		// No correction needed
 		successStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#10B981")).
@@ -117,6 +138,19 @@ func runFix(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
+	if correction.IsDangerous {
+		if fixShellMode {
+			return fmt.Errorf("dangerous command")
+		}
+		displayCorrection(correction)
+		return nil
+	}
+
+	if fixShellMode {
+		fmt.Println(strings.TrimSpace(correction.Corrected))
+		return nil
+	}
+
 	// Display correction
 	displayCorrection(correction)
 
@@ -126,6 +160,13 @@ func runFix(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("failed to copy to clipboard: %w", err)
 		}
 		fmt.Printf("%s Copied to clipboard\n", ui.Success("✓"))
+	}
+
+	if fixExec && correction.Corrected != "" {
+		fmt.Printf("%s Executing: %s\n", ui.Success("✓"), ui.Green(correction.Corrected))
+		if err := db.ExecuteCommand(correction.Corrected); err != nil {
+			return fmt.Errorf("failed to execute corrected command: %w", err)
+		}
 	}
 
 	return nil
@@ -179,9 +220,8 @@ func looksLikeNaturalLanguage(input string) bool {
 // runSemanticSearch uses the semantic engine to translate natural language
 // into shell commands and displays ranked results.
 func runSemanticSearch(query string) error {
-	results := corrector.QuerySemantic(query, 5)
-
-	if len(results) == 0 {
+	results, err := semanticMatches(query)
+	if err != nil {
 		fmt.Println()
 		fmt.Println(ui.Yellow("🤔 No matching commands found for: ") + lipgloss.NewStyle().Bold(true).Render(query))
 		fmt.Println("Try rephrasing, e.g: \"list running containers\" or \"undo last commit\"")
@@ -219,6 +259,22 @@ func runSemanticSearch(query string) error {
 	}
 
 	return nil
+}
+
+func bestSemanticMatch(query string) (string, error) {
+	results, err := semanticMatches(query)
+	if err != nil {
+		return "", err
+	}
+	return results[0].Intent.Command, nil
+}
+
+func semanticMatches(query string) ([]corrector.IntentMatch, error) {
+	results := corrector.QuerySemantic(query, 5)
+	if len(results) == 0 {
+		return nil, fmt.Errorf("no semantic matches found")
+	}
+	return results, nil
 }
 
 func displayCorrection(c *corrector.Correction) {

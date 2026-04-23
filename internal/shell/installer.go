@@ -273,6 +273,51 @@ __wut_with_current() {
     wut suggest "$cmd"
 }
 
+__wut_last_command_from_history() {
+    if [[ $# -gt 0 ]]; then
+        printf '%s\n' "$*"
+        return
+    fi
+
+    local last_cmd=""
+    if [[ -n "$BASH_VERSION" || -n "$ZSH_VERSION" ]]; then
+        last_cmd="$(fc -ln -1 2>/dev/null | tail -n 1)"
+        case "$last_cmd" in
+            oops*|again*|wut\ *)
+                last_cmd="$(fc -ln -2 2>/dev/null | head -n 1)"
+                ;;
+        esac
+    fi
+    printf '%s\n' "$last_cmd"
+}
+
+oops() {
+    local cmd
+    cmd="$(__wut_last_command_from_history "$@")"
+    cmd="$(printf '%s' "$cmd" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+    if [[ -z "$cmd" || "$cmd" == wut\ * || "$cmd" == oops* || "$cmd" == again* ]]; then
+        return 1
+    fi
+
+    local fixed
+    fixed="$(WUT_SOURCE_SHELL="${WUT_SOURCE_SHELL:-${BASH_VERSION:+bash}${ZSH_VERSION:+zsh}}" wut fix --shell "$cmd")" || {
+        wut fix "$cmd"
+        return 1
+    }
+
+    if [[ -z "$fixed" || "$fixed" == "$cmd" ]]; then
+        wut fix "$cmd"
+        return 1
+    fi
+
+    printf '%s\n' "$fixed"
+    eval "$fixed"
+}
+
+again() {
+    oops "$@"
+}
+
 if [[ -n "$BASH_VERSION" ]] && declare -F command_not_found_handle >/dev/null 2>&1; then
     eval "$(declare -f command_not_found_handle | sed '1s/command_not_found_handle/__wut_original_command_not_found_handle/')"
 fi
@@ -362,6 +407,43 @@ function __wut_with_current
     commandline -f repaint
 end
 
+function oops
+    set -l cmd (string join ' ' $argv)
+    if test -z "$cmd"
+        set cmd $history[1]
+        if string match -qr '^(oops|again|wut)\b' -- $cmd
+            set cmd $history[2]
+        end
+    end
+
+    set cmd (string trim -- $cmd)
+    if test -z "$cmd"
+        return 1
+    end
+    if string match -qr '^(oops|again|wut)\b' -- $cmd
+        return 1
+    end
+
+    set -l fixed (env WUT_SOURCE_SHELL=fish wut fix --shell "$cmd")
+    if test $status -ne 0
+        wut fix "$cmd"
+        return 1
+    end
+
+    set fixed (string trim -- $fixed)
+    if test -z "$fixed"
+        wut fix "$cmd"
+        return 1
+    end
+
+    echo $fixed
+    eval $fixed
+end
+
+function again
+    oops $argv
+end
+
 functions -q fish_command_not_found; and functions -c fish_command_not_found __wut_original_fish_command_not_found
 function fish_command_not_found
     wut fix "$argv"
@@ -400,6 +482,44 @@ function Invoke-WUT-WithCurrent {
     [Microsoft.PowerShell.PSConsoleReadLine]::Insert($cmdLine)
     [Microsoft.PowerShell.PSConsoleReadLine]::AcceptLine()
 }
+
+function Invoke-WUTOops {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$CommandLine
+    )
+
+    $target = ($CommandLine -join ' ').Trim()
+    if (-not $target) {
+        $history = @(Get-History -Count 2 -ErrorAction SilentlyContinue)
+        if ($history.Count -gt 0) {
+            $target = $history[0].CommandLine
+            if (($target -like 'oops*' -or $target -like 'again*' -or $target -like 'wut *') -and $history.Count -gt 1) {
+                $target = $history[1].CommandLine
+            }
+        }
+    }
+
+    if (-not $target -or $target -like 'oops*' -or $target -like 'again*' -or $target -like 'wut *') {
+        return
+    }
+
+    $env:WUT_SOURCE_SHELL = '%s'
+    $fixed = & wut fix --shell $target
+    $exitCode = $LASTEXITCODE
+    Remove-Item Env:\WUT_SOURCE_SHELL -ErrorAction SilentlyContinue
+
+    if ($exitCode -ne 0 -or [string]::IsNullOrWhiteSpace($fixed)) {
+        & wut fix $target
+        return
+    }
+
+    Write-Host $fixed -ForegroundColor Cyan
+    Invoke-Expression $fixed
+}
+
+Set-Alias oops Invoke-WUTOops -ErrorAction SilentlyContinue
+Set-Alias again Invoke-WUTOops -ErrorAction SilentlyContinue
 
 if (-not $global:WUTOriginalCommandNotFoundAction) {
     $global:WUTOriginalCommandNotFoundAction = $ExecutionContext.InvokeCommand.CommandNotFoundAction
@@ -445,7 +565,7 @@ function global:prompt {
 
 Set-PSReadLineKeyHandler -Chord 'Ctrl+SpaceBar' -ScriptBlock { Invoke-WUT-TUI } -ErrorAction SilentlyContinue
 Set-PSReadLineKeyHandler -Chord 'Ctrl+g' -ScriptBlock { Invoke-WUT-WithCurrent } -ErrorAction SilentlyContinue
-`, sourceShell)
+`, sourceShell, sourceShell)
 }
 
 func generateNushellCode() string {
@@ -489,6 +609,18 @@ $env.config.hooks.command_not_found = (
 def --env wut-current-line [] {
     ^wut suggest (commandline)
 }
+
+def --env oops [...args] {
+    if (($args | length) == 0) {
+        ^wut fix --exec
+    } else {
+        ^wut fix --exec ...$args
+    }
+}
+
+def --env again [...args] {
+    oops ...$args
+}
 `
 }
 
@@ -500,6 +632,8 @@ import subprocess
 from xonsh.events import events
 
 aliases["wut-tui"] = ["wut", "suggest"]
+aliases["oops"] = lambda args: subprocess.run(["wut", "fix", "--exec", *args], check=False)
+aliases["again"] = aliases["oops"]
 
 @events.on_postcommand
 def _wut_postcommand(cmd, rtn=None, out=None, ts=None, **kwargs):
@@ -551,6 +685,14 @@ set edit:insert:binding[Ctrl-G] = {
 set edit:insert:binding[Ctrl-@] = {
     wut suggest
 }
+
+fn oops {|@args|
+    wut fix --exec $@args
+}
+
+fn again {|@args|
+    oops $@args
+}
 `
 }
 
@@ -559,6 +701,8 @@ func generateCmdCode() string {
 doskey wut-tui=wut suggest
 doskey wut-current=wut suggest $*
 doskey wut-fix=wut fix $*
+doskey oops=wut fix --exec $*
+doskey again=wut fix --exec $*
 `
 }
 

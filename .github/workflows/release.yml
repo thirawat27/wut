@@ -1,0 +1,152 @@
+name: Release CI
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Git tag to create or update the release for
+        required: true
+        type: string
+      release_name:
+        description: Optional display name for the GitHub release
+        required: false
+        default: ""
+        type: string
+      draft:
+        description: Create the release as a draft
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  build:
+    runs-on: ${{ matrix.runs_on }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux
+            runs_on: ubuntu-latest
+            artifact_suffix: lnx
+            archive_ext: tar.gz
+            binary_path: dist/bin/wut
+            bundle_dir: dist/bundle/wut
+          - target: macos
+            runs_on: macos-latest
+            artifact_suffix: osx
+            archive_ext: tar.gz
+            binary_path: dist/bin/wut
+            bundle_dir: dist/bundle/wut
+          - target: windows-x64
+            runs_on: windows-latest
+            artifact_suffix: win-x64
+            archive_ext: zip
+            binary_path: dist/bin/wut.exe
+            bundle_dir: dist/bundle/wut
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Run vet
+        run: go vet ./...
+
+      - name: Build binary (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/bin
+          commit="${GITHUB_SHA::7}"
+          build_time="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          go build -trimpath -ldflags "-s -w -X main.Version=${RELEASE_TAG} -X main.BuildTime=${build_time} -X main.Commit=${commit}" -o "${{ matrix.binary_path }}" .
+
+      - name: Build binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/bin | Out-Null
+          $commit = $env:GITHUB_SHA.Substring(0, 7)
+          $buildTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+          go build -trimpath -ldflags "-s -w -X main.Version=$env:RELEASE_TAG -X main.BuildTime=$buildTime -X main.Commit=$commit" -o "${{ matrix.binary_path }}" .
+
+      - name: Stage portable bundle (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash ./.github/scripts/portable_bundle.sh "${{ matrix.binary_path }}" "${{ matrix.bundle_dir }}"
+
+      - name: Stage portable bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .github/scripts/portable_bundle.ps1 -BinaryPath "${{ matrix.binary_path }}" -OutputDir "${{ matrix.bundle_dir }}"
+
+      - name: Package release artifact (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          tar -czf "dist/wut_${RELEASE_TAG}_${{ matrix.artifact_suffix }}.tar.gz" -C "$(dirname "${{ matrix.bundle_dir }}")" "$(basename "${{ matrix.bundle_dir }}")"
+
+      - name: Package release artifact (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path "${{ matrix.bundle_dir }}" -DestinationPath "dist/wut_${env:RELEASE_TAG}_${{ matrix.artifact_suffix }}.zip" -Force
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.artifact_suffix }}
+          path: ${{ github.workspace }}/dist/wut_${{ env.RELEASE_TAG }}_${{ matrix.artifact_suffix }}.*
+          if-no-files-found: error
+
+  publish-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag_name || github.ref_name }}
+      RELEASE_NAME: ${{ github.event_name == 'workflow_dispatch' && inputs.release_name || '' }}
+      RELEASE_DRAFT: ${{ github.event_name == 'workflow_dispatch' && inputs.draft || false }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: release-*
+          merge-multiple: true
+
+      - name: Generate release notes
+        shell: bash
+        run: bash ./.github/scripts/release_notes.sh CHANGELOG.md "${{ env.RELEASE_TAG }}" release-notes.md
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ env.RELEASE_NAME != '' && env.RELEASE_NAME || env.RELEASE_TAG }}
+          draft: ${{ env.RELEASE_DRAFT == 'true' }}
+          body_path: release-notes.md
+          files: release-assets/*

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbletea"
@@ -63,10 +64,7 @@ func runSuggest(cmd *cobra.Command, args []string) error {
 	}()
 
 	// Get query from args or enter interactive mode
-	query := ""
-	if len(args) > 0 {
-		query = args[0]
-	}
+	query := strings.TrimSpace(strings.Join(args, " "))
 
 	log.Debug("processing suggest request", "query", query, "raw", suggestRaw, "offline", suggestOffline)
 

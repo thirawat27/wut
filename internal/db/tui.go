@@ -145,6 +145,8 @@ type Model struct {
 	notification     string
 	notificationTime int
 	executedCmd      string // Store command to execute after TUI closes
+	searchToken      int
+	lastSearchQuery  string
 }
 
 // NewModel creates a new DB TUI model
@@ -159,7 +161,7 @@ func NewModel() *Model {
 	// Setup list
 	items := []list.Item{}
 	l := list.New(items, list.NewDefaultDelegate(), 0, 0)
-	l.Title = "Database - Command Cheat Sheets"
+	l.Title = "Command Reference"
 	l.SetShowHelp(false)
 	// Setup viewport
 	vp := viewport.New(0, 0)
@@ -192,7 +194,7 @@ func (m *Model) SetInitialPage(page *Page) {
 	m.mode = "detail"
 	m.selectedExample = 0
 	m.totalExamples = len(page.Examples)
-	m.viewport.SetContent(m.renderPage(page))
+	m.refreshDetailViewport()
 }
 
 // GetExecutedCommand returns the command that should be executed
@@ -207,7 +209,7 @@ func (m *Model) Init() tea.Cmd {
 	}
 	return tea.Batch(
 		textinput.Blink,
-		m.loadInitialSuggestions(),
+		m.loadSuggestions(""),
 	)
 }
 
@@ -251,6 +253,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.viewport.Width = vpW
 		m.viewport.Height = vpH
+		if m.currentPage != nil {
+			m.refreshDetailViewport()
+		}
 
 	case tea.KeyMsg:
 		// Global keys
@@ -276,7 +281,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.mode = "detail"
 						m.selectedExample = 0
 						m.totalExamples = len(page.Examples)
-						m.viewport.SetContent(m.renderPage(page))
+						m.refreshDetailViewport()
 					} else {
 						// Select from list
 						if item, ok := m.list.SelectedItem().(DBItem); ok {
@@ -304,13 +309,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "j", "down":
 				if m.selectedExample < m.totalExamples-1 {
 					m.selectedExample++
-					m.viewport.SetContent(m.renderPage(m.currentPage))
+					m.refreshDetailViewport()
 				}
 
 			case "k", "up":
 				if m.selectedExample > 0 {
 					m.selectedExample--
-					m.viewport.SetContent(m.renderPage(m.currentPage))
+					m.refreshDetailViewport()
 				}
 
 			case "c", "y":
@@ -318,9 +323,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.currentPage != nil && m.selectedExample < len(m.currentPage.Examples) {
 					cmd := cleanCommand(m.currentPage.Examples[m.selectedExample].Command)
 					if err := clipboard.WriteAll(cmd); err == nil {
-						m.showNotification("📋 Copied to clipboard!")
+						return m, m.showNotification("Copied to clipboard")
 					} else {
-						m.showNotification("❌ Copy failed: " + err.Error())
+						return m, m.showNotification("Copy failed: " + err.Error())
 					}
 				}
 
@@ -337,8 +342,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				num := int(msg.Runes[0] - '1')
 				if num < m.totalExamples {
 					m.selectedExample = num
-					m.viewport.SetContent(m.renderPage(m.currentPage))
+					m.refreshDetailViewport()
 				}
+			case "pgdown", "ctrl+f":
+				m.viewport.PageDown()
+			case "pgup", "ctrl+b":
+				m.viewport.PageUp()
 			}
 		}
 
@@ -351,25 +360,31 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = "detail"
 			m.selectedExample = 0
 			m.totalExamples = len(msg.page.Examples)
-			m.viewport.SetContent(m.renderPage(msg.page))
+			m.refreshDetailViewport()
 		}
 		return m, nil
 
 	case searchResultsMsg:
+		if msg.token != m.searchToken || msg.query != strings.TrimSpace(m.input.Value()) {
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			m.err = msg.err
 		} else {
 			m.pages = msg.pages
 			items := make([]list.Item, len(msg.pages))
+			suggestions := make([]string, 0, len(msg.pages))
 			for i, page := range msg.pages {
 				items[i] = DBItem{
 					Page:      &page,
 					ItemTitle: page.Name,
 					ItemDesc:  page.Description,
 				}
+				suggestions = append(suggestions, page.Name)
 			}
 			m.list.SetItems(items)
+			m.input.SetSuggestions(suggestions)
 		}
 		return m, nil
 
@@ -398,8 +413,8 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Real-time search on input change
 		if _, ok := msg.(tea.KeyMsg); ok {
 			query := strings.TrimSpace(m.input.Value())
-			if len(query) >= 2 {
-				cmds = append(cmds, m.searchCommand(query))
+			if query != m.lastSearchQuery {
+				cmds = append(cmds, m.loadSuggestions(query))
 			}
 		}
 	} else {
@@ -429,7 +444,7 @@ func (m *Model) searchView() string {
 	var b strings.Builder
 
 	// Title
-	title := titleStyle.Render("🔍 Database - Command Cheat Sheets")
+	title := titleStyle.Render("🔍 Command Reference")
 	b.WriteString(title)
 	b.WriteString("\n")
 
@@ -459,7 +474,7 @@ func (m *Model) searchView() string {
 	// Help
 	helpText := "enter: view • /: search • esc/q: quit"
 	if m.width < 50 {
-		helpText = "enter/view • /search • q: quit"
+		helpText = "enter/open • /search • q: quit"
 	}
 	help := helpStyle.Render(helpText)
 	b.WriteString("\n")
@@ -495,48 +510,8 @@ func (m *Model) detailView() string {
 	b.WriteString(header)
 	b.WriteString("\n")
 
-	// Description
-	if m.currentPage.Description != "" {
-		desc := descriptionStyle.Render(m.currentPage.Description)
-		b.WriteString(desc)
-		b.WriteString("\n")
-	}
-
-	// Examples
-	if len(m.currentPage.Examples) > 0 {
-		b.WriteString(lipgloss.NewStyle().
-			Bold(true).
-			Foreground(primaryColor).
-			Render("Examples:"))
-		b.WriteString("\n")
-
-		for i, ex := range m.currentPage.Examples {
-			// Number with selection indicator
-			numStyle := lipgloss.NewStyle().
-				Foreground(mutedColor)
-			if i == m.selectedExample {
-				numStyle = numStyle.Bold(true).Foreground(accentColor)
-			}
-			num := numStyle.Render(fmt.Sprintf("%d.", i+1))
-
-			// Description
-			desc := exampleDescStyle.Render(ex.Description)
-
-			// Command with selection highlight
-			cmdStyle := exampleCmdStyle
-			if i == m.selectedExample {
-				cmdStyle = selectedExampleStyle
-			}
-			cmd := cmdStyle.Render(ex.Command)
-
-			b.WriteString(num)
-			b.WriteString(" ")
-			b.WriteString(desc)
-			b.WriteString("\n")
-			b.WriteString(cmd)
-			b.WriteString("\n")
-		}
-	}
+	b.WriteString("\n\n")
+	b.WriteString(m.viewport.View())
 
 	// Notification
 	if m.notification != "" {
@@ -545,12 +520,12 @@ func (m *Model) detailView() string {
 	}
 
 	// Footer
-	footerText := "↑/↓: select • 1-9: jump • c: copy • e: execute • esc: back"
+	footerText := "↑/↓: select • pgup/pgdn: scroll • 1-9: jump • c: copy • e: run • esc: back"
 	if m.width < 70 {
-		footerText = "↑/↓: sel • c: copy • e: exec • esc: back"
+		footerText = "↑/↓: sel • pgup/pgdn: scroll • c: copy • e: run • esc: back"
 	}
 	if m.width < 45 {
-		footerText = "↑/↓ • c: cop • e: exe • esc"
+		footerText = "↑/↓ • pg • c • e • esc"
 	}
 
 	footer := helpStyle.Render(footerText)
@@ -589,7 +564,12 @@ func (m *Model) renderPage(page *Page) string {
 		b.WriteString("\n")
 
 		for i, ex := range page.Examples {
-			b.WriteString(fmt.Sprintf("%d. ", i+1))
+			numStyle := lipgloss.NewStyle().Foreground(mutedColor)
+			if i == m.selectedExample {
+				numStyle = numStyle.Bold(true).Foreground(accentColor)
+			}
+			b.WriteString(numStyle.Render(fmt.Sprintf("%d.", i+1)))
+			b.WriteString(" ")
 			b.WriteString(exampleDescStyle.Render(ex.Description))
 			b.WriteString("\n")
 
@@ -624,13 +604,16 @@ type pageLoadedMsg struct {
 type searchResultsMsg struct {
 	pages []Page
 	err   error
+	query string
+	token int
 }
 type tickMsg struct{}
 
 // showNotification shows a notification for a few seconds
-func (m *Model) showNotification(msg string) {
+func (m *Model) showNotification(msg string) tea.Cmd {
 	m.notification = msg
 	m.notificationTime = 3
+	return m.tick()
 }
 
 // tick creates a tick command
@@ -640,51 +623,39 @@ func (m *Model) tick() tea.Cmd {
 	})
 }
 
-// loadInitialSuggestions loads initial command suggestions
-func (m *Model) loadInitialSuggestions() tea.Cmd {
+// loadSuggestions refreshes search results for the current query.
+func (m *Model) loadSuggestions(query string) tea.Cmd {
+	query = strings.TrimSpace(query)
+	m.loading = true
+	m.err = nil
+	m.lastSearchQuery = query
+	m.searchToken++
+	token := m.searchToken
+
 	return func() tea.Msg {
-		commands, err := m.client.FindCommandMatches(context.Background(), "", 50)
+		matchQuery := query
+		if len(matchQuery) < 2 {
+			matchQuery = ""
+		}
+
+		commands, err := m.client.FindCommandMatches(context.Background(), matchQuery, 50)
 		if err != nil {
-			return searchResultsMsg{err: err}
+			return searchResultsMsg{err: err, query: query, token: token}
 		}
 
 		var pages []Page
 		for _, cmd := range commands {
 			pages = append(pages, Page{
 				Name:        cmd,
-				Description: fmt.Sprintf("View documentation for '%s'", cmd),
+				Description: fmt.Sprintf("Open examples for '%s'", cmd),
 				Platform:    "common",
 			})
 		}
 
-		return searchResultsMsg{pages: pages}
-	}
-}
-
-// searchCommand searches for a command
-func (m *Model) searchCommand(query string) tea.Cmd {
-	m.loading = true
-	m.err = nil
-
-	return func() tea.Msg {
-		ctx := context.Background()
-
-		if m.storage != nil {
-			if commands, err := m.client.FindCommandMatches(ctx, query, 50); err == nil && len(commands) > 0 {
-				pages := make([]Page, len(commands))
-				for i, command := range commands {
-					pages[i] = Page{
-						Name:        command,
-						Description: fmt.Sprintf("View documentation for '%s'", command),
-						Platform:    "common",
-					}
-				}
-				return searchResultsMsg{pages: pages}
-			}
-
+		if len(query) >= 2 && m.storage != nil {
 			storedPages, err := m.storage.SearchLocalLimited(query, 50)
 			if err == nil && len(storedPages) > 0 {
-				pages := make([]Page, len(storedPages))
+				pages = make([]Page, len(storedPages))
 				for i, sp := range storedPages {
 					pages[i] = Page{
 						Name:        sp.Name,
@@ -692,25 +663,14 @@ func (m *Model) searchCommand(query string) tea.Cmd {
 						Description: sp.Description,
 					}
 				}
-				return searchResultsMsg{pages: pages}
 			}
 		}
 
-		commands, _ := m.client.FindCommandMatches(ctx, query, 50)
-		pages := make([]Page, 0, len(commands))
-		for _, cmd := range commands {
-			pages = append(pages, Page{
-				Name:        cmd,
-				Description: fmt.Sprintf("View documentation for '%s'", cmd),
-				Platform:    "common",
-			})
+		if len(pages) == 0 && query != "" {
+			return searchResultsMsg{err: fmt.Errorf("command not found: %s", query), query: query, token: token}
 		}
 
-		if len(pages) == 0 {
-			return searchResultsMsg{err: fmt.Errorf("command not found: %s", query)}
-		}
-
-		return searchResultsMsg{pages: pages}
+		return searchResultsMsg{pages: pages, query: query, token: token}
 	}
 }
 
@@ -720,10 +680,51 @@ func (m *Model) showPage(command string) tea.Cmd {
 	m.err = nil
 
 	return func() tea.Msg {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
 		page, err := m.client.GetPageAnyPlatform(ctx, command)
 		return pageLoadedMsg{page: page, err: err}
 	}
+}
+
+func (m *Model) refreshDetailViewport() {
+	if m.currentPage == nil {
+		return
+	}
+	m.viewport.SetContent(m.renderPage(m.currentPage))
+	m.ensureSelectedExampleVisible()
+}
+
+func (m *Model) ensureSelectedExampleVisible() {
+	if m.currentPage == nil || m.viewport.Height <= 0 {
+		return
+	}
+
+	top := m.selectedExampleLine()
+	bottom := top + 1
+
+	switch {
+	case m.viewport.YOffset > top:
+		m.viewport.SetYOffset(top)
+	case m.viewport.YOffset+m.viewport.Height-1 < bottom:
+		m.viewport.SetYOffset(max(0, bottom-m.viewport.Height+1))
+	}
+}
+
+func (m *Model) selectedExampleLine() int {
+	if m.currentPage == nil || m.selectedExample < 0 {
+		return 0
+	}
+
+	line := 0
+	if m.currentPage.Description != "" {
+		line++
+	}
+	if len(m.currentPage.Examples) > 0 {
+		line++
+	}
+	line += m.selectedExample * 2
+	return line
 }
 
 // cleanCommand removes placeholder syntax for execution
